@@ -28,6 +28,8 @@
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-body);
@@ -46,6 +48,7 @@ h1, h2 { font-family: var(--font-display); font-weight: 400; margin: 0; text-wra
 
 /* ----- 처음 설정 ----- */
 .setup {
+  width: 100%;
   max-width: 520px;
   margin: 0 auto;
   padding: 28px 18px 40px;
@@ -91,10 +94,13 @@ h1, h2 { font-family: var(--font-display); font-weight: 400; margin: 0; text-wra
 }
 .steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 16px; }
 .error { color: var(--warn); font-weight: 500; }
+.banner { padding: 12px 16px; background: #2C2216; color: var(--warn); font-size: 16px; font-weight: 500; display: flex; flex-direction: column; gap: 8px; }
+.banner p { margin: 0; }
+.banner a { align-self: flex-start; padding: 8px 14px; border: 1px solid var(--warn); border-radius: 10px; color: var(--warn); text-decoration: none; font-weight: 700; }
 a { color: var(--go); }
 
 /* ----- 라이브 화면 ----- */
-.live { height: 100%; display: flex; flex-direction: column; }
+.live { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .stage {
   position: relative;
   flex: 1 1 auto;
@@ -198,6 +204,11 @@ a { color: var(--go); }
 </head>
 <body>
 
+<div class="banner" id="compat" hidden>
+  <p id="compat-text"></p>
+  <a id="open-chrome" href="#" hidden>Chrome 앱으로 열기</a>
+</div>
+
 <section class="setup" id="setup" hidden>
   <h1>라이브 묻기</h1>
   <p>카메라로 비추면서 말로 물으면, Claude가 화면을 보고 소리로 답합니다.</p>
@@ -237,8 +248,10 @@ a { color: var(--go); }
     <button class="ctl" type="button" id="btn-cam" aria-pressed="true">카메라</button>
     <button class="ctl" type="button" id="btn-flip">앞뒤 전환</button>
     <button class="ctl" type="button" id="btn-screen" aria-pressed="false" hidden>화면 공유</button>
+    <button class="ctl" type="button" id="btn-auto" aria-pressed="true">계속 듣기</button>
     <button class="ctl" type="button" id="btn-text" aria-pressed="false">글로 보기</button>
     <button class="ctl" type="button" id="btn-set">설정</button>
+    <button class="ctl" type="button" id="btn-end" hidden>끝내기</button>
   </div>
 </main>
 
@@ -262,10 +275,24 @@ a { color: var(--go); }
         <option value="1.2">빠르게</option>
       </select>
     </div>
+    <div class="field">
+      <label for="pause">말이 끝난 뒤 기다리는 시간</label>
+      <select id="pause">
+        <option value="1200">짧게 (1초쯤)</option>
+        <option value="2000" selected>보통 (2초)</option>
+        <option value="3000">길게 (3초)</option>
+      </select>
+      <p class="muted">말하는 도중에 답이 먼저 나오면 길게로 바꾸세요. 듣는 중에 「다 말했어요」를 누르면 기다리지 않고 바로 보냅니다.</p>
+    </div>
     <div class="rowbtn">
       <button class="plain" type="button" id="clear-chat">대화 내용 지우기</button>
       <button class="plain" type="button" id="change-key">API 키 바꾸기</button>
       <button class="plain" type="button" id="delete-key">API 키 지우기</button>
+    </div>
+    <div class="field">
+      <button class="plain" type="button" id="test-sound">소리 시험</button>
+      <p class="muted" id="test-result" role="status"></p>
+      <p class="muted" id="diag"></p>
     </div>
     <button class="big" type="button" id="close-sheet">닫기</button>
   </div>
@@ -283,6 +310,8 @@ a { color: var(--go); }
     main: $('btn-main'), cam: $('btn-cam'), flip: $('btn-flip'), screen: $('btn-screen'), text: $('btn-text'), set: $('btn-set'),
     sheet: $('sheet'), model: $('model'), rate: $('rate'),
     clearChat: $('clear-chat'), changeKey: $('change-key'), deleteKey: $('delete-key'), closeSheet: $('close-sheet'),
+    compat: $('compat'), compatText: $('compat-text'), openChrome: $('open-chrome'),
+    pause: $('pause'), auto: $('btn-auto'), end: $('btn-end'), testSound: $('test-sound'), testResult: $('test-result'), diag: $('diag'),
   };
 
   const API = 'https://api.anthropic.com/v1/messages';
@@ -290,6 +319,10 @@ a { color: var(--go); }
   const Rec = window.SpeechRecognition || window.webkitSpeechRecognition || null;
   const canSpeak = 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function';
   const canShareScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+  const UA = navigator.userAgent || '';
+  const isAndroid = /Android/i.test(UA);
+  const isIOS = /iP(hone|ad|od)/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const inApp = /KAKAOTALK|NAVER\(|Instagram|FBAN|FBAV|Line\/|DaumApps|; wv\)/i.test(UA);
 
   const store = {
     get(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
@@ -301,7 +334,10 @@ a { color: var(--go); }
     key: store.get('live-ask-key') || '',
     model: store.get('live-ask-model') || DEFAULT_MODEL,
     rate: Number(store.get('live-ask-rate')) || 1,
+    pauseMs: Number(store.get('live-ask-pause')) || 2000, pauseTimer: 0, pauseArmed: false, carry: '', heardNow: '',
     showText: store.get('live-ask-text') === 'on',
+    auto: store.get('live-ask-auto') !== 'off', manualForced: false, idleEnds: 0,
+    ttsDoubt: false, runSpoke: false,
     camOn: true, facing: 'environment',
     live: false, phase: 'idle', run: 0,
     cam: null, shared: null,
@@ -341,10 +377,13 @@ a { color: var(--go); }
     reflectAll();
   }
   function setStatus(msg) { el.status.textContent = msg || ''; }
+  function addStatus(msg) { el.status.textContent = el.status.textContent ? el.status.textContent + ' ' + msg : msg; }
 
   const PHASE = {
     idle: ['쉬는 중', '시작', ''],
-    listening: ['듣는 중', '끝내기', 'end'],
+    prep: ['준비하는 중', '끝내기', 'end'],
+    ready: ['말하기를 누르세요', '말하기', ''],
+    listening: ['듣는 중', '다 말했어요', ''],
     thinking: ['생각하는 중', '말 끊기', 'cut'],
     speaking: ['답하는 중', '말 끊기', 'cut'],
   };
@@ -353,14 +392,19 @@ a { color: var(--go); }
     const [pill, label, cls] = PHASE[p];
     el.pill.textContent = S.noMic && p === 'listening' ? '글로 물어보세요' : pill;
     el.pill.className = 'pill ' + p;
-    el.main.textContent = label;
-    el.main.className = 'main' + (cls ? ' ' + cls : '');
+    const typedOnly = p === 'listening' && S.noMic;
+    el.main.textContent = typedOnly ? '끝내기' : label;
+    el.main.className = 'main' + (typedOnly ? ' end' : (cls ? ' ' + cls : ''));
     el.typed.hidden = !(S.live && S.noMic);
+    el.end.hidden = !S.live;
   }
   function reflectAll() {
     el.cam.setAttribute('aria-pressed', String(S.camOn));
-    el.text.setAttribute('aria-pressed', String(S.showText || !canSpeak));
-    el.answer.hidden = !(S.showText || !canSpeak);
+    const textOn = S.showText || !canSpeak || S.ttsDoubt;
+    el.text.setAttribute('aria-pressed', String(textOn));
+    el.answer.hidden = !textOn;
+    el.auto.setAttribute('aria-pressed', String(S.auto && !S.manualForced));
+    el.auto.hidden = S.noMic;
     el.screen.hidden = !canShareScreen;
     el.screen.setAttribute('aria-pressed', String(!!S.shared));
     el.flip.disabled = !S.camOn || !!S.shared;
@@ -442,6 +486,39 @@ a { color: var(--go); }
   }
 
   /* ---------- 듣기 ---------- */
+  function isManual() { return !S.auto || S.manualForced; }
+  const joinText = (a, b) => (a && b ? a + ' ' + b : (a || b || ''));
+  /* 기기에 따라 같은 말이 누적되어 다시 오기도 해서, 앞부분이 겹치면 이어 붙이지 않고 바꿉니다. */
+  function mergeHeard(acc, t) {
+    const a = String(acc || '').trim();
+    const b = String(t || '').trim();
+    if (!b) return a;
+    if (!a) return b;
+    if (b.indexOf(a) === 0) return b;
+    if (a.indexOf(b) === 0 || a.slice(-b.length) === b) return a;
+    return a + ' ' + b;
+  }
+  function clearPause() { window.clearTimeout(S.pauseTimer); S.pauseArmed = false; }
+  function resetHeard() { clearPause(); S.carry = ''; S.heardNow = ''; }
+  /* 말이 멈춘 뒤 정해 둔 시간만큼 더 기다렸다가 보냅니다. 그 사이에 말이 이어지면 처음부터 다시 기다립니다. */
+  function armPause() {
+    window.clearTimeout(S.pauseTimer);
+    S.pauseArmed = true;
+    S.pauseTimer = window.setTimeout(() => {
+      S.pauseArmed = false;
+      if (!S.live || S.phase !== 'listening') return;
+      finishUtterance();
+    }, S.pauseMs);
+  }
+  function finishUtterance() {
+    const text = String(S.heardNow || '').trim();
+    if (!text) return false;
+    resetHeard();
+    S.failCount = 0;
+    S.idleEnds = 0;
+    ask(text);
+    return true;
+  }
   function stopListening() {
     const r = S.rec;
     if (!r) return;
@@ -450,43 +527,65 @@ a { color: var(--go); }
   }
   function micBlocked(msg) {
     S.noMic = true;
+    resetHeard();
     setStatus(msg);
     setPhase('listening');
+    reflectAll();
   }
-  function listen() {
+  /* fromTap: 사용자가 버튼을 눌러 시작한 듣기. 누를 때만 듣기 방식에서는 이때만 마이크를 켭니다. */
+  function listen(fromTap) {
     if (!S.live) return;
+    if (S.noMic) { setPhase('listening'); return; }
+    if (isManual() && !fromTap) { setPhase('ready'); return; }
     setPhase('listening');
-    if (S.noMic) return;
-    if (S.recActive) { window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(); }, 250); return; }
+    if (S.recActive) { window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(true); }, 250); return; }
     const r = new Rec();
     r.lang = 'ko-KR';
     r.interimResults = true;
-    r.continuous = false;
+    r.continuous = true;
     r.maxAlternatives = 1;
-    let finalText = '';
+    let sessionFinal = '';
+    let interim = '';
     let errCode = '';
     const startedAt = Date.now();
     r.onresult = (ev) => {
-      let interim = '';
+      if (dead.has(r)) return;
+      interim = '';
       for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
         const t = ev.results[i][0].transcript;
-        if (ev.results[i].isFinal) finalText += t; else interim += t;
+        if (ev.results[i].isFinal) sessionFinal = mergeHeard(sessionFinal, t);
+        else interim = joinText(interim, String(t || '').trim());
       }
-      if (!dead.has(r)) el.heard.textContent = (finalText + interim).trim();
+      S.heardNow = joinText(S.carry, mergeHeard(sessionFinal, interim));
+      el.heard.textContent = S.heardNow;
+      if (S.heardNow) armPause();
     };
     r.onerror = (ev) => { errCode = ev.error || 'error'; };
     r.onend = () => {
       S.recActive = false;
       if (S.rec === r) S.rec = null;
       if (dead.has(r) || !S.live || S.phase !== 'listening') return;
-      const text = finalText.trim();
-      if (text) { S.failCount = 0; ask(text); return; }
+      const got = mergeHeard(sessionFinal, interim);
+      if (got || S.carry) {
+        // 인식이 먼저 끝났어도 바로 보내지 않고, 기다리는 시간 동안 이어지는 말을 계속 듣습니다.
+        S.carry = joinText(S.carry, got);
+        S.heardNow = S.carry;
+        S.failCount = 0;
+        S.idleEnds = 0;
+        if (!S.pauseArmed) armPause();
+        window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(true); }, 150);
+        return;
+      }
       if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
-        micBlocked('마이크 사용이 허용되지 않았습니다. 아래 칸에 글로 물어보세요.');
+        micBlocked('마이크 사용이 허용되지 않았습니다. 주소창의 자물쇠(사이트 설정) 아이콘에서 마이크를 허용한 뒤 다시 시작해 주세요. 지금은 아래 칸에 글로 물어볼 수 있습니다.');
         return;
       }
       if (errCode === 'network') {
         micBlocked('음성 인식에 연결하지 못했습니다. 아래 칸에 글로 물어보세요.');
+        return;
+      }
+      if (errCode === 'audio-capture') {
+        micBlocked('마이크를 쓸 수 없습니다. 다른 앱이 마이크를 쓰고 있는지 확인해 주세요. 지금은 아래 칸에 글로 물어볼 수 있습니다.');
         return;
       }
       S.failCount = Date.now() - startedAt < 800 ? S.failCount + 1 : 0;
@@ -494,7 +593,16 @@ a { color: var(--go); }
         micBlocked('이 브라우저에서는 말을 알아듣지 못합니다. 아래 칸에 글로 물어보세요.');
         return;
       }
-      window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(); }, 350);
+      if (isManual()) { setPhase('ready'); return; }
+      // 말이 없으면 몇 번만 다시 듣고 쉽니다. 권한 창과 알림음이 끝없이 반복되지 않게 합니다.
+      S.idleEnds += 1;
+      if (S.idleEnds >= 4) {
+        S.idleEnds = 0;
+        setPhase('ready');
+        setStatus('한동안 말이 없어 쉬고 있습니다. 말하기를 누르면 다시 듣습니다.');
+        return;
+      }
+      window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(true); }, 350);
     };
     try {
       r.start();
@@ -503,7 +611,7 @@ a { color: var(--go); }
     } catch (e) {
       S.failCount += 1;
       if (S.failCount >= 4) micBlocked('이 브라우저에서는 말을 알아듣지 못합니다. 아래 칸에 글로 물어보세요.');
-      else window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(); }, 600);
+      else window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(true); }, 600);
     }
   }
 
@@ -519,7 +627,8 @@ a { color: var(--go); }
     try { window.speechSynthesis.onvoiceschanged = pickVoice; } catch (e) { /* 말할 때 다시 찾습니다 */ }
   }
   function primeSpeech() {
-    if (!canSpeak) return;
+    // iPhone은 누른 순간에 한 번 소리를 내야 이후 답을 읽을 수 있습니다. Android에서는 빈 소리가 대기열을 막을 수 있어 하지 않습니다.
+    if (!canSpeak || !isIOS) return;
     try {
       const u = new SpeechSynthesisUtterance(' ');
       u.volume = 0;
@@ -527,17 +636,29 @@ a { color: var(--go); }
     } catch (e) { /* 소리 없이 글로 보여 줍니다 */ }
   }
   function hush() {
-    if (canSpeak) { try { window.speechSynthesis.cancel(); } catch (e) { /* 이미 조용함 */ } }
+    if (canSpeak) {
+      try {
+        const synth = window.speechSynthesis;
+        if (synth.speaking || synth.pending) synth.cancel();
+      } catch (e) { /* 이미 조용함 */ }
+    }
     liveUtterances = [];
     S.speakPending = 0;
     window.clearTimeout(S.watchdog);
+  }
+  /* 소리가 시작됐다는 신호가 없으면 답을 글로도 보여 줍니다. 읽기는 끊지 않습니다. */
+  function ttsDoubt() {
+    S.ttsDoubt = true;
+    reflectAll();
+    setStatus('소리가 안 들리면 설정의 소리 시험을 눌러 보세요. 답은 글로도 보여 드립니다.');
   }
   function say(text, run) {
     if (!canSpeak || !text) return;
     if (!koVoice) pickVoice();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'ko-KR';
-    if (koVoice) u.voice = koVoice;
+    // Android에서는 목소리를 직접 지정하면 소리가 안 나는 기기가 있어 언어만 지정합니다.
+    if (koVoice && !isAndroid) u.voice = koVoice;
     u.rate = S.rate;
     let finished = false;
     const done = () => {
@@ -547,11 +668,20 @@ a { color: var(--go); }
       S.speakPending -= 1;
       maybeResume(run);
     };
+    u.onstart = () => {
+      if (run !== S.run) return;
+      S.runSpoke = true;
+      if (S.ttsDoubt) { S.ttsDoubt = false; reflectAll(); }
+    };
     u.onend = done;
     u.onerror = done;
     S.speakPending += 1;
     liveUtterances.push(u);
-    try { window.speechSynthesis.speak(u); } catch (e) { done(); }
+    try {
+      const synth = window.speechSynthesis;
+      if (synth.paused) synth.resume();
+      synth.speak(u);
+    } catch (e) { done(); }
   }
   /* 문장이 끝날 때마다 바로 읽어서, 답이 다 오기 전에 말이 시작되게 합니다. */
   function speakReady(buf, run, final) {
@@ -626,8 +756,10 @@ a { color: var(--go); }
     const text = String(rawText || '').trim();
     if (!text || !S.live) return;
     stopListening();
+    resetHeard();
     hush();
     const run = ++S.run;
+    S.runSpoke = false;
     setPhase('thinking');
     setStatus('');
     el.heard.textContent = text;
@@ -678,6 +810,12 @@ a { color: var(--go); }
         S.speakPending = 0;
         maybeResume(run);
       }, 8000 + full.length * 320);
+      if (canSpeak && S.speakPending > 0) {
+        window.setTimeout(() => {
+          if (run !== S.run || S.runSpoke) return;
+          ttsDoubt();
+        }, 5000);
+      }
       maybeResume(run);
     } catch (e) {
       if (run !== S.run) return;
@@ -699,17 +837,88 @@ a { color: var(--go); }
       if (navigator.wakeLock && navigator.wakeLock.request) S.wake = await navigator.wakeLock.request('screen');
     } catch (e) { S.wake = null; }
   }
+  async function micPermissionState() {
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        const p = await navigator.permissions.query({ name: 'microphone' });
+        return p.state;
+      }
+    } catch (e) { /* 확인할 수 없는 브라우저 */ }
+    return 'unknown';
+  }
+  /* 시작할 때 카메라와 마이크 권한을 한 번에 받아 둡니다. 듣기를 다시 켤 때마다 권한 창이 뜨지 않게 하려는 것입니다. */
+  async function openMedia() {
+    stopStream(S.cam);
+    S.cam = null;
+    const md = navigator.mediaDevices;
+    const wantMic = !!Rec;
+    const wantCam = S.camOn;
+    if (!md || !md.getUserMedia) {
+      S.camOn = false;
+      addStatus('이 주소에서는 카메라를 켤 수 없습니다. https 주소로 열어야 합니다.');
+      showSource();
+      reflectAll();
+      return;
+    }
+    const video = { facingMode: { ideal: S.facing }, width: { ideal: 1280 }, height: { ideal: 720 } };
+    let both = null;
+    if (wantMic && wantCam) {
+      try { both = await md.getUserMedia({ video, audio: true }); } catch (e) { both = null; }
+    }
+    if (both) {
+      for (const t of both.getAudioTracks()) { try { t.stop(); both.removeTrack(t); } catch (e) { /* 이미 멈춤 */ } }
+      S.cam = both;
+    } else {
+      if (wantMic) {
+        try {
+          const a = await md.getUserMedia({ audio: true });
+          stopStream(a);
+        } catch (e) {
+          S.noMic = true;
+          addStatus('마이크 사용이 허용되지 않았습니다. 주소창의 자물쇠(사이트 설정) 아이콘에서 마이크를 허용한 뒤 다시 시작해 주세요. 지금은 아래 칸에 글로 물어볼 수 있습니다.');
+        }
+      }
+      if (wantCam) {
+        try {
+          S.cam = await md.getUserMedia({ video, audio: false });
+        } catch (e) {
+          S.camOn = false;
+          addStatus(e && e.name === 'NotAllowedError'
+            ? '카메라 사용이 허용되지 않아 말로만 대화합니다.'
+            : '카메라를 켜지 못해 말로만 대화합니다.');
+        }
+      }
+    }
+    if (!S.live || !S.camOn) { stopStream(S.cam); S.cam = null; }
+    showSource();
+    reflectAll();
+    // 마이크를 놓아준 뒤 음성 인식이 잡을 수 있게 잠깐 기다립니다.
+    await new Promise((res) => window.setTimeout(res, 300));
+  }
   async function startLive() {
     if (S.live) return;
     S.live = true;
     S.failCount = 0;
+    S.idleEnds = 0;
     S.noMic = !Rec;
-    setStatus(Rec ? '' : '이 브라우저는 말을 알아듣지 못합니다. 아래 칸에 글로 물어보세요.');
+    S.manualForced = false;
+    setStatus('');
     primeSpeech();
-    setPhase('listening');
-    if (S.camOn) await openCamera(); else showSource();
+    setPhase('prep');
+    await openMedia();
     if (!S.live) return;
     requestWake();
+    if (!Rec) {
+      addStatus('이 브라우저는 말을 알아듣지 못합니다. 아래 칸에 글로 물어보세요.');
+    } else if (!S.noMic) {
+      const st = await micPermissionState();
+      if (!S.live) return;
+      if (st === 'prompt') {
+        S.manualForced = true;
+        addStatus('마이크 권한이 계속 허용되어 있지 않아, 말하기 버튼을 누를 때만 듣습니다. 권한 창에서 "사이트 방문 중 허용"을 고르면 계속 듣습니다.');
+      }
+    }
+    reflectAll();
     listen();
   }
   function stopLive() {
@@ -719,6 +928,7 @@ a { color: var(--go); }
     if (S.ctl) { try { S.ctl.abort(); } catch (e) { /* 이미 끝남 */ } }
     hush();
     stopListening();
+    resetHeard();
     stopStream(S.cam); S.cam = null;
     stopStream(S.shared); S.shared = null;
     if (S.wake) { try { S.wake.release(); } catch (e) { /* 이미 풀림 */ } S.wake = null; }
@@ -732,16 +942,35 @@ a { color: var(--go); }
     S.run += 1;
     if (S.ctl) { try { S.ctl.abort(); } catch (e) { /* 이미 끝남 */ } }
     hush();
+    resetHeard();
+    el.heard.textContent = '';
     S.streamDone = true;
-    listen();
+    S.idleEnds = 0;
+    listen(true);
   }
 
   /* ---------- 버튼 ---------- */
   el.main.addEventListener('click', () => {
     if (!S.live) { startLive(); return; }
-    if (S.phase === 'listening') { stopLive(); setStatus(''); return; }
+    if (S.phase === 'ready') { S.idleEnds = 0; setStatus(''); primeSpeech(); listen(true); return; }
+    if (S.phase === 'prep' || (S.phase === 'listening' && S.noMic)) { stopLive(); setStatus(''); return; }
+    if (S.phase === 'listening') {
+      if (!finishUtterance()) setStatus('아직 들은 말이 없습니다. 말씀하신 뒤에 눌러 주세요.');
+      return;
+    }
     primeSpeech();
     interrupt();
+  });
+  el.end.addEventListener('click', () => { stopLive(); setStatus(''); });
+  el.auto.addEventListener('click', () => {
+    S.auto = !(S.auto && !S.manualForced);
+    S.manualForced = false;
+    store.set('live-ask-auto', S.auto ? 'on' : 'off');
+    if (S.live && !S.noMic) {
+      if (!S.auto && S.phase === 'listening') { stopListening(); resetHeard(); el.heard.textContent = ''; setPhase('ready'); }
+      else if (S.auto && S.phase === 'ready') { S.idleEnds = 0; listen(true); }
+    }
+    reflectAll();
   });
   el.cam.addEventListener('click', () => {
     S.camOn = !S.camOn;
@@ -773,6 +1002,9 @@ a { color: var(--go); }
   el.set.addEventListener('click', () => {
     el.model.value = S.model;
     el.rate.value = String(S.rate);
+    el.pause.value = String(S.pauseMs);
+    el.testResult.textContent = '';
+    fillDiag();
     el.sheet.hidden = false;
     el.closeSheet.focus();
   });
@@ -782,9 +1014,72 @@ a { color: var(--go); }
     store.set('live-ask-model', m);
     S.rate = Number(el.rate.value) || 1;
     store.set('live-ask-rate', String(S.rate));
+    S.pauseMs = Number(el.pause.value) || 2000;
+    store.set('live-ask-pause', String(S.pauseMs));
     el.sheet.hidden = true;
     el.set.focus();
   }
+  /* ---------- 브라우저 확인과 소리 시험 ---------- */
+  function showCompat() {
+    let msg = '';
+    if (!Rec && !canSpeak) msg = '말 알아듣기와 소리 답변이 되지 않습니다.';
+    else if (!Rec) msg = '말 알아듣기가 되지 않습니다.';
+    else if (!canSpeak) msg = '소리 답변이 되지 않습니다.';
+    if (!msg) return;
+    el.compatText.textContent = (inApp ? '지금은 다른 앱 안의 브라우저로 열려 있어 ' : '이 브라우저에서는 ') + msg + ' Chrome 앱에서 이 주소를 직접 열어 주세요.';
+    if (isAndroid) {
+      el.openChrome.href = 'intent://' + window.location.host + window.location.pathname + '#Intent;scheme=https;package=com.android.chrome;end';
+      el.openChrome.hidden = false;
+    }
+    el.compat.hidden = false;
+  }
+  async function fillDiag() {
+    const st = await micPermissionState();
+    let n = 0;
+    try { n = (window.speechSynthesis.getVoices() || []).filter((v) => /^ko/i.test(v.lang || '')).length; } catch (e) { n = 0; }
+    let browser = '기타';
+    if (inApp) browser = '앱 안 브라우저';
+    else if (/SamsungBrowser/i.test(UA)) browser = '삼성 인터넷';
+    else if (/Edg\//.test(UA)) browser = 'Edge';
+    else if (/CriOS|Chrome\//.test(UA)) browser = 'Chrome';
+    else if (/Safari\//.test(UA)) browser = 'Safari';
+    const mic = { granted: '허용', denied: '차단', prompt: '매번 묻기', unknown: '확인 불가' }[st] || st;
+    el.diag.textContent = [
+      '버전: 3',
+      '브라우저: ' + browser,
+      '말 알아듣기: ' + (Rec ? '지원' : '미지원'),
+      '소리 답변: ' + (canSpeak ? '지원' : '미지원'),
+      '한국어 음성: ' + n + '개',
+      '마이크 권한: ' + mic,
+    ].join(' · ');
+  }
+  el.testSound.addEventListener('click', () => {
+    if (!canSpeak) { el.testResult.textContent = '이 브라우저는 소리 답변을 지원하지 않습니다. Chrome 앱에서 열어 주세요.'; return; }
+    try {
+      const synth = window.speechSynthesis;
+      if (synth.speaking || synth.pending) synth.cancel();
+      const u = new SpeechSynthesisUtterance('소리가 잘 들리면 준비가 된 것입니다.');
+      u.lang = 'ko-KR';
+      u.rate = Number(el.rate.value) || 1;
+      let ok = false;
+      u.onstart = () => {
+        ok = true;
+        S.ttsDoubt = false;
+        reflectAll();
+        el.testResult.textContent = '지금 소리를 내고 있습니다. 안 들리면 휴대폰의 미디어 음량을 올려 주세요.';
+      };
+      u.onerror = (ev) => { el.testResult.textContent = '소리를 내지 못했습니다. (' + ((ev && ev.error) || '오류') + ')'; };
+      liveUtterances.push(u);
+      el.testResult.textContent = '소리를 내는 중입니다.';
+      synth.speak(u);
+      window.setTimeout(() => {
+        if (!ok) el.testResult.textContent = '소리가 시작되지 않았습니다. 휴대폰 설정에서 "Google 음성 서비스"(글자 읽어주기)와 한국어 음성 데이터가 설치되어 있는지 확인해 주세요.';
+      }, 4000);
+    } catch (e) {
+      el.testResult.textContent = '소리를 내지 못했습니다.';
+    }
+  });
+
   el.closeSheet.addEventListener('click', closeSheet);
   el.sheet.addEventListener('click', (e) => {
     if (e.target === el.sheet) closeSheet();
@@ -830,6 +1125,7 @@ a { color: var(--go); }
     }
   });
 
+  showCompat();
   if (S.key) showLive(); else showSetup('');
 })();
 </script>
