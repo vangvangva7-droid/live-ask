@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-d0Zvl1P8/74vHZTFYqfp77X6ojqobnB6nVGrE4h4J94='; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src https://api.anthropic.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-6eORU7igkHT8QOhDGBOvzO4WVZbt4/eexg/D1xpRklY='; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src https://api.anthropic.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0E1512">
@@ -331,12 +331,14 @@ a { color: var(--go); }
       <p class="muted">기억하지 않으면 "아까 그거"처럼 앞의 말을 가리키는 질문은 알아듣지 못합니다. 어느 쪽이든 대화와 사진은 휴대폰에 저장하지 않고, 끝내기를 누르면 모두 지웁니다. 답을 받으려고 Anthropic 서버로 보낸 내용은 여기서 지울 수 없고, 그쪽 규정에 따라 보통 30일 안에 자동으로 지워집니다.</p>
     </div>
     <div class="field">
-      <label for="budget">크레딧 한도 (달러)</label>
+      <label for="budget">한 달 크레딧 전체 (달러)</label>
       <input id="budget" type="number" inputmode="decimal" min="1" step="1">
+      <label for="warn-pct">사용량 경고 기준 (전체의 몇 %부터 알릴지)</label>
+      <input id="warn-pct" type="number" inputmode="numeric" min="5" max="100" step="5">
       <label for="reset-day">크레딧이 새로 들어오는 날 (매월 며칠)</label>
       <input id="reset-day" type="number" inputmode="numeric" min="1" max="31" step="1">
       <p class="muted" id="usage-detail"></p>
-      <p class="muted">이 기기에서 쓴 양을 요금표로 계산한 추정치입니다. 정확한 잔액은 Claude Console에서 확인하세요. 한도의 80%부터 알리고, 100%가 되면 사용을 막습니다.</p>
+      <p class="muted">이 앱은 이 휴대폰에서 쓴 양만 셀 수 있고, 다른 사람이 쓴 양은 알지 못합니다. 이 휴대폰에서 쓴 양이 전체 크레딧의 경고 기준에 닿으면 알려 줍니다. 세 명이 함께 쓴다면 40% 정도가 알맞습니다. 크레딧이 실제로 모두 떨어지면 누구의 휴대폰에서든 자동으로 막히고, 다시 들어오면 자동으로 풀립니다. 모두가 쓴 합계와 정확한 잔액은 Claude Console에서만 볼 수 있습니다.</p>
     </div>
     <div class="field">
       <button class="plain" type="button" id="test-sound">소리 시험</button>
@@ -364,7 +366,7 @@ a { color: var(--go); }
     sheet: $('sheet'), model: $('model'), rate: $('rate'),
     clearChat: $('clear-chat'), changeKey: $('change-key'), deleteKey: $('delete-key'), closeSheet: $('close-sheet'),
     compat: $('compat'), compatText: $('compat-text'), openChrome: $('open-chrome'),
-    pause: $('pause'), scan: $('btn-scan'), stage: $('stage'), install: $('btn-install'), usageNote: $('usage-note'), recheck: $('recheck'), memory: $('memory'), budget: $('budget'), resetDay: $('reset-day'), usageDetail: $('usage-detail'), torch: $('btn-torch'), main2: $('btn-main2'), interp: $('btn-interp'), myLang: $('my-lang'), otherLang: $('other-lang'), auto: $('btn-auto'), end: $('btn-end'), testSound: $('test-sound'), testResult: $('test-result'), diag: $('diag'),
+    pause: $('pause'), warnPct: $('warn-pct'), scan: $('btn-scan'), stage: $('stage'), install: $('btn-install'), usageNote: $('usage-note'), recheck: $('recheck'), memory: $('memory'), budget: $('budget'), resetDay: $('reset-day'), usageDetail: $('usage-detail'), torch: $('btn-torch'), main2: $('btn-main2'), interp: $('btn-interp'), myLang: $('my-lang'), otherLang: $('other-lang'), auto: $('btn-auto'), end: $('btn-end'), testSound: $('test-sound'), testResult: $('test-result'), diag: $('diag'),
   };
 
   const API = 'https://api.anthropic.com/v1/messages';
@@ -407,6 +409,8 @@ a { color: var(--go); }
     interp: false, listenLang: '', outLang: '', interpLog: [], onceLang: '', transView: false,
     memory: ['none', 'short', 'session'].indexOf(store.get('live-ask-memory')) >= 0 ? store.get('live-ask-memory') : 'none',
     budget: Number(store.get('live-ask-budget')) || 100,
+    warnPct: Math.min(100, Math.max(5, Math.round(Number(store.get('live-ask-warn')) || 40))),
+    probing: false,
     resetDay: Math.min(31, Math.max(1, Math.round(Number(store.get('live-ask-reset')) || 15))),
     memTimer: 0, screenTimer: 0, sheetPaused: false, scan: false, scanWanted: false, torchOn: false, canTorch: false,
     camOn: true, facing: 'environment',
@@ -991,26 +995,72 @@ a { color: var(--go); }
     const u = loadUsage();
     const ratio = S.budget > 0 ? u.usd / S.budget : 0;
     const apiBlocked = store.get('live-ask-blocked') === c.key;
-    return { u, c, ratio, apiBlocked, blocked: apiBlocked || ratio >= 1 };
+    const overEstimate = ratio >= 1;
+    return { u, c, ratio, apiBlocked, overEstimate, blocked: apiBlocked || overEstimate };
   }
   function nextResetText(c) { return (c.next.getMonth() + 1) + '월 ' + c.next.getDate() + '일'; }
   function reflectUsage() {
     const st = usageState();
     const pct = Math.round(st.ratio * 100);
     let note = '';
-    if (st.apiBlocked) note = '크레딧을 모두 써서 사용을 막았습니다. ' + nextResetText(st.c) + '에 새 크레딧이 들어오면 다시 쓸 수 있습니다.';
-    else if (st.ratio >= 1) note = '이 기기에서 쓴 양이 정해 둔 한도 ' + S.budget + '달러에 닿아 사용을 막았습니다. ' + nextResetText(st.c) + '에 다시 풀립니다.';
-    else if (st.ratio >= 0.95) note = '크레딧을 거의 다 썼습니다. 한도의 ' + pct + '%를 썼습니다. (추정)';
-    else if (st.ratio >= 0.8) note = '크레딧이 얼마 남지 않았습니다. 한도의 ' + pct + '%를 썼습니다. (추정)';
+    if (st.apiBlocked) note = '크레딧을 모두 써서 사용을 막았습니다. 크레딧이 다시 들어오면 자동으로 풀립니다. 다음 충전일은 ' + nextResetText(st.c) + '입니다.';
+    else if (st.overEstimate) note = '이 휴대폰에서 쓴 양만으로 전체 크레딧 ' + S.budget + '달러에 닿아 사용을 막았습니다. ' + nextResetText(st.c) + '에 다시 풀립니다.';
+    else if (st.ratio >= 0.95) note = '크레딧을 거의 다 썼습니다. 이 휴대폰에서 전체의 ' + pct + '%를 썼습니다. (추정)';
+    else if (st.ratio >= S.warnPct / 100) note = '이 휴대폰에서 전체 크레딧의 ' + pct + '%를 썼습니다. (추정) 여럿이 함께 쓰는 크레딧이니 사용량에 유의해 주세요.';
     el.usageNote.textContent = note;
     el.usageNote.className = 'usage' + (st.blocked ? ' stop' : '');
     el.recheck.hidden = !st.blocked;
-    el.main.disabled = st.blocked && !S.live;
+    // 서버가 막은 경우에는 시작 버튼으로 다시 확인할 수 있게 열어 둡니다.
+    el.main.disabled = !S.live && st.overEstimate && !st.apiBlocked;
     return st;
   }
   function usageDetailText() {
     const st = usageState();
-    return '이번 기간 사용 추정: ' + st.u.usd.toFixed(st.u.usd < 1 ? 4 : 2) + '달러 / ' + S.budget + '달러 (' + Math.round(st.ratio * 100) + '%) · 질문 ' + st.u.n + '번 · 다음 충전일 ' + nextResetText(st.c);
+    return '이 휴대폰에서 이번 기간에 쓴 양(추정): ' + st.u.usd.toFixed(st.u.usd < 1 ? 4 : 2) + '달러 / 전체 ' + S.budget + '달러 (' + Math.round(st.ratio * 100) + '%) · 경고 기준 ' + S.warnPct + '% · 질문 ' + st.u.n + '번 · 다음 충전일 ' + nextResetText(st.c);
+  }
+  /* 크레딧이 떨어져 막힌 뒤, 다시 들어왔는지 아주 작은 요청 하나로 확인합니다. 들어왔으면 스스로 풉니다. */
+  async function probeCredits(quiet) {
+    if (S.probing || !S.key) return false;
+    if (!usageState().apiBlocked) return true;
+    S.probing = true;
+    store.set('live-ask-probe', String(Date.now()));
+    if (!quiet) setStatus('크레딧이 다시 들어왔는지 확인하는 중입니다.');
+    try {
+      const resp = await fetch(API, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': S.key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({ model: S.model, max_tokens: 1, messages: [{ role: 'user', content: '.' }] }),
+      });
+      if (resp.ok) {
+        store.del('live-ask-blocked');
+        reflectUsage();
+        setStatus('크레딧이 다시 들어와서 사용할 수 있습니다.');
+        return true;
+      }
+      const err = await apiError(resp);
+      if (err.needKey) { showSetup(err.userMessage); return false; }
+      if (err.credit) { if (!quiet) setStatus('아직 크레딧이 들어오지 않았습니다.'); return false; }
+      if (!quiet) setStatus(err.userMessage || '확인하지 못했습니다. 잠시 뒤에 다시 눌러 주세요.');
+      return false;
+    } catch (e) {
+      if (!quiet) setStatus('확인하지 못했습니다. 인터넷 연결을 본 뒤 다시 눌러 주세요.');
+      return false;
+    } finally {
+      S.probing = false;
+    }
+  }
+  /* 앱을 열거나 다시 돌아왔을 때, 막혀 있으면 5분에 한 번까지만 스스로 확인합니다. */
+  function maybeAutoProbe() {
+    if (!S.key || S.live || document.hidden) return;
+    if (!usageState().apiBlocked) return;
+    const last = Number(store.get('live-ask-probe')) || 0;
+    if (Date.now() - last < 5 * 60 * 1000) return;
+    probeCredits(true);
   }
 
   /* ---------- 기록 지우기 ---------- */
@@ -1246,6 +1296,8 @@ a { color: var(--go); }
   let scanSentAt = 0;
   let scanStartedAt = 0;
   let scanForce = false;
+  let scanMoved = true;
+  let scanFound = false;
   function scanRules() {
     const mine = langKo(S.myLang);
     return [
@@ -1259,8 +1311,8 @@ a { color: var(--go); }
     ].join('\n');
   }
   function signature(v) {
-    const w = 48;
-    const h = 27;
+    const w = 64;
+    const h = 36;
     probe.width = w;
     probe.height = h;
     const ctx = probe.getContext('2d', { willReadFrequently: true });
@@ -1270,11 +1322,27 @@ a { color: var(--go); }
     for (let i = 0, j = 0; i < d.length; i += 4, j += 1) g[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
     return g;
   }
+  /* 두 장면이 얼마나 다른지 봅니다. 손이 조금 흔들려 화면이 밀린 것은 다른 장면으로 치지 않도록,
+     위아래·좌우로 조금씩 밀어 보며 가장 잘 맞는 자리에서 잽니다. */
   function sigDiff(a, b) {
     if (!a || !b || a.length !== b.length) return 255;
-    let sum = 0;
-    for (let i = 0; i < a.length; i += 1) sum += Math.abs(a[i] - b[i]);
-    return sum / a.length;
+    const w = 64;
+    const h = 36;
+    const m = 4;
+    let least = 255;
+    for (let dy = -m; dy <= m; dy += 1) {
+      for (let dx = -m; dx <= m; dx += 1) {
+        let sum = 0;
+        for (let y = m; y < h - m; y += 1) {
+          const ra = y * w;
+          const rb = (y + dy) * w + dx;
+          for (let x = m; x < w - m; x += 1) sum += Math.abs(a[ra + x] - b[rb + x]);
+        }
+        const dist = sum / ((h - 2 * m) * (w - 2 * m));
+        if (dist < least) least = dist;
+      }
+    }
+    return least;
   }
   async function scanTick() {
     if (!S.live || !S.scan || scanBusy || !el.sheet.hidden) return;
@@ -1289,11 +1357,21 @@ a { color: var(--go); }
     }
     let sig = null;
     try { sig = signature(v); } catch (e) { return; }
-    const steady = sigDiff(sig, scanPrev) < 7;
+    const dPrev = sigDiff(sig, scanPrev);
     scanPrev = sig;
-    const changed = !scanSent || sigDiff(sig, scanSent) > 12;
-    if (!scanForce && (!steady || !changed || Date.now() - scanSentAt < 2500)) return;
+    // 장면이 크게 움직였으면 그 전에 잡아 둔 화면은 버리고, 움직임이 있었다고 적어 둡니다.
+    if (dPrev > 9) { scanMoved = true; best = null; }
+    else if (scanSent && sigDiff(sig, scanSent) > 12) scanMoved = true;
+    sampleFrame();
+    const since = Date.now() - scanSentAt;
+    let go = scanForce;
+    // 새 장면: 움직임이 있은 뒤 화면이 가라앉았을 때 (손떨림 정도는 가라앉은 것으로 봅니다)
+    if (!go && scanMoved && dPrev < 7 && since >= 2500) go = true;
+    // 아직 번역할 글자를 찾지 못했으면 화면이 흔들려도 4초마다 다시 살펴봅니다.
+    if (!go && !scanFound && since >= 4000) go = true;
+    if (!go) return;
     scanForce = false;
+    scanMoved = false;
     if (usageState().blocked) { stopLive(); reflectUsage(); return; }
     const frame = grabFrame();
     if (!frame) return;
@@ -1318,7 +1396,7 @@ a { color: var(--go); }
         },
         body: JSON.stringify({
           model: S.model,
-          max_tokens: 700,
+          max_tokens: 1500,
           system: scanRules(),
           messages: [{ role: 'user', content: [
             { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frame } },
@@ -1335,11 +1413,12 @@ a { color: var(--go); }
       if (myRun !== S.run || !S.scan) return;
       const parts = (j && Array.isArray(j.content)) ? j.content : [];
       const text = parts.filter((c) => c && c.type === 'text').map((c) => c.text).join('').trim();
-      if (!text || /^없음[.。]?$/.test(text)) {
+      scanFound = !!text && !/^없음[.。]?$/.test(text);
+      if (!scanFound) {
         el.answer.textContent = '';
-        setStatus('외국어 글자를 찾고 있습니다. 글자가 화면에 크게 들어오게 비추고 잠깐 멈춰 주세요.');
+        setStatus('아직 번역할 외국어 글자를 찾지 못했습니다. 계속 다시 살펴보고 있습니다. 글자가 화면에 크게 들어오게 비춰 주세요.');
       } else if (text !== el.answer.textContent) {
-        setStatus('');
+        setStatus('화면을 누르면 지금 보이는 장면을 바로 다시 번역합니다.');
         el.answer.textContent = text;
         hush();
         S.outLang = S.myLang;
@@ -1354,6 +1433,7 @@ a { color: var(--go); }
       if (e && e.fatal) { stopLive(); setStatus(msg); return; }
       setStatus(msg);
       scanSent = null;
+      scanFound = false;
     } finally {
       scanBusy = false;
       if (scanCtl === ctl) scanCtl = null;
@@ -1376,9 +1456,12 @@ a { color: var(--go); }
     S.transView = true;
     scanPrev = null;
     scanSent = null;
-    scanSentAt = 0;
+    // 카메라가 막 켜진 순간의 어두운 화면은 건너뛰고, 조금 뒤부터 보냅니다.
+    scanSentAt = Date.now() - 2500;
     scanStartedAt = Date.now();
     scanForce = false;
+    scanMoved = true;
+    scanFound = false;
     el.heard.textContent = '';
     el.answer.textContent = '';
     el.check.textContent = '';
@@ -1387,7 +1470,7 @@ a { color: var(--go); }
     setPhase('scan');
     reflectAll();
     window.clearInterval(scanTimer);
-    scanTimer = window.setInterval(scanTick, 900);
+    scanTimer = window.setInterval(scanTick, 700);
   }
   function endScanState() {
     S.scan = false;
@@ -1476,7 +1559,15 @@ a { color: var(--go); }
   }
   async function startLive() {
     if (S.live) return;
-    if (reflectUsage().blocked) return;
+    const us = reflectUsage();
+    if (us.apiBlocked) {
+      // 크레딧이 다시 들어왔으면 풀고 바로 시작합니다.
+      const back = await probeCredits(false);
+      if (!back || S.live || reflectUsage().blocked) { S.scanWanted = false; return; }
+    } else if (us.blocked) {
+      S.scanWanted = false;
+      return;
+    }
     S.live = true;
     S.failCount = 0;
     S.idleEnds = 0;
@@ -1567,7 +1658,8 @@ a { color: var(--go); }
   el.end.addEventListener('click', () => { stopLive(); setStatus(''); });
   el.scan.addEventListener('click', () => {
     if (S.scan) { stopScan(''); return; }
-    if (reflectUsage().blocked) return;
+    const us = reflectUsage();
+    if (us.blocked && (S.live || !us.apiBlocked)) return;
     if (!S.live) { S.scanWanted = true; startLive(); return; }
     if (S.phase === 'prep') { S.scanWanted = true; return; }
     primeSpeech();
@@ -1578,12 +1670,12 @@ a { color: var(--go); }
     if (!S.scan) return;
     scanForce = true;
     scanSent = null;
+    best = null;
+    setStatus('지금 보이는 장면을 다시 번역합니다.');
   });
   el.recheck.addEventListener('click', () => {
-    store.del('live-ask-blocked');
-    const st = reflectUsage();
-    if (st.blocked) setStatus('한도는 설정의 「크레딧 한도」에서 바꿀 수 있습니다. Console에 크레딧이 남아 있을 때만 올려 주세요.');
-    else setStatus('막힘을 풀었습니다. 시작을 눌러 다시 써 보세요. 크레딧이 아직 없으면 다시 막힙니다.');
+    if (usageState().apiBlocked) { probeCredits(false); return; }
+    setStatus('이 휴대폰의 사용량 기록이 전체 크레딧에 닿았습니다. Console에 크레딧이 남아 있다면 설정의 「한 달 크레딧 전체」가 맞는지 확인해 주세요.');
   });
   el.torch.addEventListener('click', () => {
     const track = S.cam && S.cam.getVideoTracks()[0];
@@ -1681,6 +1773,7 @@ a { color: var(--go); }
     el.myLang.value = S.myLang;
     el.memory.value = S.memory;
     el.budget.value = String(S.budget);
+    el.warnPct.value = String(S.warnPct);
     el.resetDay.value = String(S.resetDay);
     el.usageDetail.textContent = usageDetailText();
     el.otherLang.value = S.otherLang;
@@ -1707,6 +1800,8 @@ a { color: var(--go); }
     if (S.memory === 'none') wipeMemory();
     S.budget = Number(el.budget.value) > 0 ? Number(el.budget.value) : 100;
     store.set('live-ask-budget', String(S.budget));
+    S.warnPct = Math.min(100, Math.max(5, Math.round(Number(el.warnPct.value) || 40)));
+    store.set('live-ask-warn', String(S.warnPct));
     S.resetDay = Math.min(31, Math.max(1, Math.round(Number(el.resetDay.value) || 15)));
     store.set('live-ask-reset', String(S.resetDay));
     if (S.interp) S.listenLang = S.myLang;
@@ -1771,7 +1866,7 @@ a { color: var(--go); }
     else if (/Safari\//.test(UA)) browser = 'Safari';
     const mic = { granted: '허용', denied: '차단', prompt: '매번 묻기', unknown: '확인 불가' }[st] || st;
     el.diag.textContent = [
-      '버전: 13',
+      '버전: 15',
       '브라우저: ' + browser,
       '말 알아듣기: ' + (Rec ? '지원' : '미지원'),
       '소리 답변: ' + (canSpeak ? '지원' : '미지원'),
@@ -1863,6 +1958,7 @@ a { color: var(--go); }
       stopLive();
       setStatus('화면을 벗어나 대화를 끝냈습니다. 다시 하려면 시작을 눌러 주세요.');
     }
+    if (!document.hidden) maybeAutoProbe();
   });
 
   for (const [code, ko, native] of LANGS) {
@@ -1875,6 +1971,7 @@ a { color: var(--go); }
   }
   showCompat();
   if (S.key) showLive(); else showSetup('');
+  maybeAutoProbe();
 })();
 </script>
 </body>
