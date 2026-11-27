@@ -2,6 +2,8 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-e6MCRufGGjk58CoqWJ+mMkyrsb8HMyzSgXVNqfQPLN4='; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src https://api.anthropic.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0E1512">
 <link rel="manifest" href="manifest.json">
@@ -10,7 +12,6 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>라이브 묻기</title>
-<link href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root {
   /* layout: a call screen. camera fills the stage, one big button and a row of small ones sit at the bottom edge */
@@ -23,8 +24,8 @@
   --go-ink: #06140E;
   --stop: #E0703A;
   --warn: #F2B36B;
-  --font-display: "Do Hyeon", "Noto Sans KR", system-ui, sans-serif;
-  --font-body: "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-display: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-body: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -47,7 +48,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
   outline: 3px solid var(--go);
   outline-offset: 3px;
 }
-h1, h2 { font-family: var(--font-display); font-weight: 400; margin: 0; text-wrap: balance; }
+h1, h2 { font-family: var(--font-display); font-weight: 700; margin: 0; text-wrap: balance; }
 
 /* ----- 처음 설정 ----- */
 .setup {
@@ -177,7 +178,7 @@ a { color: var(--go); }
   border-radius: 16px;
   background: var(--go);
   color: var(--go-ink);
-  font: 400 26px/1.1 var(--font-display);
+  font: 700 24px/1.1 var(--font-display);
 }
 .main.end { background: var(--stop); color: #1B0A02; }
 .main.alt { background: var(--panel); color: var(--ink); border: 2px solid var(--go); }
@@ -348,6 +349,10 @@ a { color: var(--go); }
 <script>
 (() => {
   'use strict';
+  if (window.top !== window.self) {
+    document.body.textContent = '이 앱은 다른 사이트 안에서는 열리지 않습니다.';
+    return;
+  }
   const $ = (id) => document.getElementById(id);
   const el = {
     setup: $('setup'), key: $('key'), saveKey: $('save-key'), setupError: $('setup-error'),
@@ -1571,7 +1576,7 @@ a { color: var(--go); }
     else if (/Safari\//.test(UA)) browser = 'Safari';
     const mic = { granted: '허용', denied: '차단', prompt: '매번 묻기', unknown: '확인 불가' }[st] || st;
     el.diag.textContent = [
-      '버전: 10',
+      '버전: 11',
       '브라우저: ' + browser,
       '말 알아듣기: ' + (Rec ? '지원' : '미지원'),
       '소리 답변: ' + (canSpeak ? '지원' : '미지원'),
@@ -1636,6 +1641,18 @@ a { color: var(--go); }
       if (S.key) { showLive(); return; }
       el.setupError.hidden = false;
       el.setupError.textContent = 'API 키를 넣어 주세요.';
+      return;
+    }
+    if (/^sk-ant-admin/i.test(k)) {
+      el.key.value = '';
+      el.setupError.hidden = false;
+      el.setupError.textContent = '이것은 관리자 키입니다. 관리자 키는 여기에 넣지 마세요. Console의 「키」 메뉴에서 만든 일반 API 키를 넣어 주세요.';
+      return;
+    }
+    if (!/^sk-ant-/i.test(k)) {
+      el.key.value = '';
+      el.setupError.hidden = false;
+      el.setupError.textContent = 'Claude API 키가 아닌 것 같습니다. sk-ant-로 시작하는 키를 넣어 주세요.';
       return;
     }
     S.key = k;
