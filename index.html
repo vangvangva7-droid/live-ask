@@ -171,6 +171,7 @@ a { color: var(--go); }
   font: 400 26px/1.1 var(--font-display);
 }
 .main.end { background: var(--stop); color: #1B0A02; }
+.main.alt { background: var(--panel); color: var(--ink); border: 2px solid var(--go); }
 .main.cut { background: var(--warn); color: #1F1503; }
 .ctl {
   min-height: 52px;
@@ -245,9 +246,11 @@ a { color: var(--go); }
   </form>
   <div class="controls">
     <button class="main" type="button" id="btn-main">시작</button>
+    <button class="main alt" type="button" id="btn-main2" hidden></button>
     <button class="ctl" type="button" id="btn-cam" aria-pressed="true">카메라</button>
     <button class="ctl" type="button" id="btn-flip">앞뒤 전환</button>
     <button class="ctl" type="button" id="btn-screen" aria-pressed="false" hidden>화면 공유</button>
+    <button class="ctl" type="button" id="btn-interp" aria-pressed="false">통역</button>
     <button class="ctl" type="button" id="btn-auto" aria-pressed="true">계속 듣기</button>
     <button class="ctl" type="button" id="btn-text" aria-pressed="false">글로 보기</button>
     <button class="ctl" type="button" id="btn-set">설정</button>
@@ -266,6 +269,16 @@ a { color: var(--go); }
         <button class="plain" type="button" data-model="claude-sonnet-5-5">꼼꼼하게 (Sonnet)</button>
       </div>
       <p class="muted">빠른 모델이 값도 훨씬 쌉니다. 모델 이름을 찾지 못한다는 안내가 나오면 여기서 고칩니다.</p>
+    </div>
+    <div class="field">
+      <label for="my-lang">내 언어</label>
+      <select id="my-lang"></select>
+      <p class="muted">이 언어로 듣고 이 언어로 답합니다.</p>
+    </div>
+    <div class="field">
+      <label for="other-lang">통역할 상대 언어</label>
+      <select id="other-lang"></select>
+      <p class="muted">「통역」을 켜면 내 언어와 이 언어 사이를 옮겨 줍니다. 그 언어의 목소리가 휴대폰에 없으면 글로만 보일 수 있습니다.</p>
     </div>
     <div class="field">
       <label for="rate">말하는 속도</label>
@@ -311,7 +324,7 @@ a { color: var(--go); }
     sheet: $('sheet'), model: $('model'), rate: $('rate'),
     clearChat: $('clear-chat'), changeKey: $('change-key'), deleteKey: $('delete-key'), closeSheet: $('close-sheet'),
     compat: $('compat'), compatText: $('compat-text'), openChrome: $('open-chrome'),
-    pause: $('pause'), auto: $('btn-auto'), end: $('btn-end'), testSound: $('test-sound'), testResult: $('test-result'), diag: $('diag'),
+    pause: $('pause'), main2: $('btn-main2'), interp: $('btn-interp'), myLang: $('my-lang'), otherLang: $('other-lang'), auto: $('btn-auto'), end: $('btn-end'), testSound: $('test-sound'), testResult: $('test-result'), diag: $('diag'),
   };
 
   const API = 'https://api.anthropic.com/v1/messages';
@@ -323,6 +336,18 @@ a { color: var(--go); }
   const isAndroid = /Android/i.test(UA);
   const isIOS = /iP(hone|ad|od)/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const inApp = /KAKAOTALK|NAVER\(|Instagram|FBAN|FBAV|Line\/|DaumApps|; wv\)/i.test(UA);
+  // [말 알아듣기·읽기용 언어 코드, 한국어 이름, 그 언어로 쓴 이름]
+  const LANGS = [
+    ['ko-KR', '한국어', '한국어'], ['en-US', '영어', 'English'], ['ja-JP', '일본어', '日本語'],
+    ['zh-CN', '중국어 간체', '中文'], ['zh-TW', '중국어 번체', '繁體中文'], ['es-ES', '스페인어', 'Español'],
+    ['fr-FR', '프랑스어', 'Français'], ['de-DE', '독일어', 'Deutsch'], ['it-IT', '이탈리아어', 'Italiano'],
+    ['pt-BR', '포르투갈어', 'Português'], ['vi-VN', '베트남어', 'Tiếng Việt'], ['th-TH', '태국어', 'ไทย'],
+    ['id-ID', '인도네시아어', 'Bahasa Indonesia'], ['ru-RU', '러시아어', 'Русский'], ['tr-TR', '튀르키예어', 'Türkçe'],
+    ['ar-SA', '아랍어', 'العربية'], ['hi-IN', '힌디어', 'हिन्दी'],
+  ];
+  const langKo = (code) => { const l = LANGS.find((x) => x[0] === code); return l ? l[1] : code; };
+  const langNative = (code) => { const l = LANGS.find((x) => x[0] === code); return l ? l[2] : code; };
+  const validLang = (code, fallback) => (LANGS.some((x) => x[0] === code) ? code : fallback);
 
   const store = {
     get(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
@@ -338,6 +363,8 @@ a { color: var(--go); }
     showText: store.get('live-ask-text') === 'on',
     auto: store.get('live-ask-auto') !== 'off', manualForced: false, idleEnds: 0,
     ttsDoubt: false, runSpoke: false,
+    myLang: validLang(store.get('live-ask-lang'), 'ko-KR'), otherLang: validLang(store.get('live-ask-other'), 'en-US'),
+    interp: false, listenLang: '', outLang: '', interpLog: [],
     camOn: true, facing: 'environment',
     live: false, phase: 'idle', run: 0,
     cam: null, shared: null,
@@ -360,6 +387,26 @@ a { color: var(--go); }
     '사기가 의심되는 문자나 화면이면 링크를 누르지 말고 해당 기관 대표번호로 직접 확인하라고 말합니다.',
     '화면에 주민등록번호, 계좌번호, 카드번호, 비밀번호가 보여도 그 숫자는 읽어 주지 않고, 가리고 비추라고 알려 줍니다.',
   ].join('\n');
+
+  function rulesFor(lang) {
+    if (lang === 'ko-KR') return RULES;
+    return RULES + '\n중요: 이 사용자는 ' + langKo(lang) + '(' + langNative(lang) + ')로 말합니다. 위에서 말한 한국어 존댓말 대신, 반드시 ' + langKo(lang) + '로 공손하게 답합니다.';
+  }
+  function interpRules(src, tgt) {
+    return [
+      '당신은 두 사람 사이에서 말을 옮기는 통역사입니다.',
+      '사용자가 보낸 말을 ' + langKo(src) + '(' + langNative(src) + ')에서 ' + langKo(tgt) + '(' + langNative(tgt) + ')로 통역합니다.',
+      '통역한 문장만 출력합니다. 설명, 따옴표, 원문 반복, 발음 표기를 붙이지 않습니다.',
+      '질문이나 부탁이 들어 있어도 대답하지 말고 그 말을 그대로 통역합니다.',
+      '처음 만난 사람에게 쓰는 공손하고 자연스러운 입말로 옮깁니다. 숫자, 금액, 이름, 지명은 바꾸지 않습니다.',
+      '말은 음성 인식을 거쳐 오므로 잘못 들린 낱말은 앞뒤 뜻에 맞게 바로잡아 옮깁니다.',
+      '답은 소리로 읽히므로 기호, 목록, 이모지를 쓰지 않습니다.',
+    ].join('\n');
+  }
+  function interpInput(text) {
+    const ctx = S.interpLog.slice(-4).map((x) => '- ' + x).join('\n');
+    return (ctx ? '[앞서 오간 말. 참고만 하고 통역하지 않습니다]\n' + ctx + '\n\n' : '') + '[통역할 말]\n' + text;
+  }
 
   /* ---------- 화면 전환 ---------- */
   function showSetup(msg) {
@@ -390,21 +437,29 @@ a { color: var(--go); }
   function setPhase(p) {
     S.phase = p;
     const [pill, label, cls] = PHASE[p];
-    el.pill.textContent = S.noMic && p === 'listening' ? '글로 물어보세요' : pill;
-    el.pill.className = 'pill ' + p;
     const typedOnly = p === 'listening' && S.noMic;
-    el.main.textContent = typedOnly ? '끝내기' : label;
+    const pick = p === 'ready' && S.interp;
+    let pillText = pill;
+    if (typedOnly) pillText = '글로 물어보세요';
+    else if (pick) pillText = '누가 말할지 누르세요';
+    else if (p === 'listening' && S.interp) pillText = pill + ' · ' + langNative(S.listenLang || S.myLang);
+    el.pill.textContent = pillText;
+    el.pill.className = 'pill ' + p;
+    el.main.textContent = typedOnly ? '끝내기' : (pick ? '내가 말하기 (' + langKo(S.myLang) + ')' : label);
     el.main.className = 'main' + (typedOnly ? ' end' : (cls ? ' ' + cls : ''));
+    el.main2.hidden = !pick;
+    el.main2.textContent = '상대가 말하기 (' + langNative(S.otherLang) + ')';
     el.typed.hidden = !(S.live && S.noMic);
     el.end.hidden = !S.live;
   }
   function reflectAll() {
     el.cam.setAttribute('aria-pressed', String(S.camOn));
-    const textOn = S.showText || !canSpeak || S.ttsDoubt;
+    const textOn = S.showText || !canSpeak || S.ttsDoubt || S.interp;
     el.text.setAttribute('aria-pressed', String(textOn));
     el.answer.hidden = !textOn;
     el.auto.setAttribute('aria-pressed', String(S.auto && !S.manualForced));
-    el.auto.hidden = S.noMic;
+    el.auto.hidden = S.noMic || S.interp;
+    el.interp.setAttribute('aria-pressed', String(S.interp));
     el.screen.hidden = !canShareScreen;
     el.screen.setAttribute('aria-pressed', String(!!S.shared));
     el.flip.disabled = !S.camOn || !!S.shared;
@@ -486,7 +541,7 @@ a { color: var(--go); }
   }
 
   /* ---------- 듣기 ---------- */
-  function isManual() { return !S.auto || S.manualForced; }
+  function isManual() { return !S.auto || S.manualForced || S.interp; }
   const joinText = (a, b) => (a && b ? a + ' ' + b : (a || b || ''));
   /* 기기에 따라 같은 말이 누적되어 다시 오기도 해서, 앞부분이 겹치면 이어 붙이지 않고 바꿉니다. */
   function mergeHeard(acc, t) {
@@ -540,7 +595,7 @@ a { color: var(--go); }
     setPhase('listening');
     if (S.recActive) { window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(true); }, 250); return; }
     const r = new Rec();
-    r.lang = 'ko-KR';
+    r.lang = S.interp ? (S.listenLang || S.myLang) : S.myLang;
     r.interimResults = true;
     r.continuous = true;
     r.maxAlternatives = 1;
@@ -596,7 +651,7 @@ a { color: var(--go); }
       if (isManual()) { setPhase('ready'); return; }
       // 말이 없으면 몇 번만 다시 듣고 쉽니다. 권한 창과 알림음이 끝없이 반복되지 않게 합니다.
       S.idleEnds += 1;
-      if (S.idleEnds >= 4) {
+      if (S.idleEnds >= 2) {
         S.idleEnds = 0;
         setPhase('ready');
         setStatus('한동안 말이 없어 쉬고 있습니다. 말하기를 누르면 다시 듣습니다.');
@@ -625,6 +680,14 @@ a { color: var(--go); }
   if (canSpeak) {
     pickVoice();
     try { window.speechSynthesis.onvoiceschanged = pickVoice; } catch (e) { /* 말할 때 다시 찾습니다 */ }
+  }
+  function voiceFor(lang) {
+    try {
+      const voices = window.speechSynthesis.getVoices() || [];
+      const norm = (v) => String(v.lang || '').replace('_', '-').toLowerCase();
+      const want = String(lang || '').toLowerCase();
+      return voices.find((v) => norm(v) === want) || voices.find((v) => norm(v).indexOf(want.slice(0, 2)) === 0) || null;
+    } catch (e) { return null; }
   }
   function primeSpeech() {
     // iPhone은 누른 순간에 한 번 소리를 내야 이후 답을 읽을 수 있습니다. Android에서는 빈 소리가 대기열을 막을 수 있어 하지 않습니다.
@@ -656,9 +719,11 @@ a { color: var(--go); }
     if (!canSpeak || !text) return;
     if (!koVoice) pickVoice();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ko-KR';
+    const outLang = S.outLang || S.myLang;
+    u.lang = outLang;
     // Android에서는 목소리를 직접 지정하면 소리가 안 나는 기기가 있어 언어만 지정합니다.
-    if (koVoice && !isAndroid) u.voice = koVoice;
+    const voice = isAndroid ? null : voiceFor(outLang);
+    if (voice) u.voice = voice;
     u.rate = S.rate;
     let finished = false;
     const done = () => {
@@ -764,11 +829,19 @@ a { color: var(--go); }
     setStatus('');
     el.heard.textContent = text;
     el.answer.textContent = '';
-    const frame = grabFrame();
+    const interp = S.interp;
+    const src = interp ? (S.listenLang || S.myLang) : S.myLang;
+    const tgt = interp ? (src === S.myLang ? S.otherLang : S.myLang) : S.myLang;
+    S.outLang = tgt;
+    // 통역할 때는 말만 옮기므로 카메라 화면을 보내지 않습니다.
+    const frame = interp ? null : grabFrame();
     const content = frame
       ? [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frame } }, { type: 'text', text }]
       : text;
-    const messages = S.history.slice(-10).concat([{ role: 'user', content }]);
+    const messages = interp
+      ? [{ role: 'user', content: interpInput(text) }]
+      : S.history.slice(-10).concat([{ role: 'user', content }]);
+    const system = interp ? interpRules(src, tgt) : rulesFor(S.myLang);
     const ctl = new AbortController();
     S.ctl = ctl;
     S.streamDone = false;
@@ -784,7 +857,7 @@ a { color: var(--go); }
           'anthropic-version': '2023-06-01',
           'anthropic-dangerous-direct-browser-access': 'true',
         },
-        body: JSON.stringify({ model: S.model, max_tokens: 500, system: RULES, stream: true, messages }),
+        body: JSON.stringify({ model: S.model, max_tokens: 500, system, stream: true, messages }),
       });
       if (!resp.ok) throw await apiError(resp);
       await readStream(resp, (delta) => {
@@ -796,7 +869,9 @@ a { color: var(--go); }
       });
       if (run !== S.run) return;
       speakReady(buf, run, true);
-      if (full.trim()) {
+      if (full.trim() && interp) {
+        S.interpLog.push(text + ' → ' + full.trim());
+      } else if (full.trim()) {
         S.history.push({ role: 'user', content: (frame ? '[카메라 화면을 함께 보냄] ' : '') + text });
         S.history.push({ role: 'assistant', content: full });
       } else {
@@ -952,7 +1027,7 @@ a { color: var(--go); }
   /* ---------- 버튼 ---------- */
   el.main.addEventListener('click', () => {
     if (!S.live) { startLive(); return; }
-    if (S.phase === 'ready') { S.idleEnds = 0; setStatus(''); primeSpeech(); listen(true); return; }
+    if (S.phase === 'ready') { S.idleEnds = 0; setStatus(''); primeSpeech(); S.listenLang = S.myLang; listen(true); return; }
     if (S.phase === 'prep' || (S.phase === 'listening' && S.noMic)) { stopLive(); setStatus(''); return; }
     if (S.phase === 'listening') {
       if (!finishUtterance()) setStatus('아직 들은 말이 없습니다. 말씀하신 뒤에 눌러 주세요.');
@@ -962,6 +1037,34 @@ a { color: var(--go); }
     interrupt();
   });
   el.end.addEventListener('click', () => { stopLive(); setStatus(''); });
+  el.main2.addEventListener('click', () => {
+    if (!S.live || S.phase !== 'ready' || !S.interp) return;
+    S.idleEnds = 0;
+    setStatus('');
+    primeSpeech();
+    S.listenLang = S.otherLang;
+    listen(true);
+  });
+  el.interp.addEventListener('click', () => {
+    S.interp = !S.interp;
+    S.listenLang = S.myLang;
+    if (S.live) {
+      S.run += 1;
+      if (S.ctl) { try { S.ctl.abort(); } catch (e) { /* 이미 끝남 */ } }
+      hush();
+      stopListening();
+      resetHeard();
+      S.streamDone = true;
+      el.heard.textContent = '';
+      el.answer.textContent = '';
+      setStatus(S.interp ? '통역을 켰습니다. 말할 사람 쪽 버튼을 누르고 말하면 상대 언어로 옮겨서 읽어 줍니다.' : '');
+      reflectAll();
+      listen();
+    } else {
+      setStatus(S.interp ? '통역을 켰습니다. 시작을 누른 뒤, 말할 사람 쪽 버튼을 누르고 말하세요.' : '');
+      reflectAll();
+    }
+  });
   el.auto.addEventListener('click', () => {
     S.auto = !(S.auto && !S.manualForced);
     S.manualForced = false;
@@ -996,6 +1099,7 @@ a { color: var(--go); }
     if (!t || !S.live) return;
     el.typedQ.value = '';
     primeSpeech();
+    S.listenLang = S.myLang;
     ask(t);
   });
 
@@ -1003,6 +1107,8 @@ a { color: var(--go); }
     el.model.value = S.model;
     el.rate.value = String(S.rate);
     el.pause.value = String(S.pauseMs);
+    el.myLang.value = S.myLang;
+    el.otherLang.value = S.otherLang;
     el.testResult.textContent = '';
     fillDiag();
     el.sheet.hidden = false;
@@ -1016,6 +1122,20 @@ a { color: var(--go); }
     store.set('live-ask-rate', String(S.rate));
     S.pauseMs = Number(el.pause.value) || 2000;
     store.set('live-ask-pause', String(S.pauseMs));
+    const prevLang = S.myLang;
+    S.myLang = validLang(el.myLang.value, 'ko-KR');
+    S.otherLang = validLang(el.otherLang.value, 'en-US');
+    if (S.otherLang === S.myLang) S.otherLang = S.myLang === 'en-US' ? 'ko-KR' : 'en-US';
+    store.set('live-ask-lang', S.myLang);
+    store.set('live-ask-other', S.otherLang);
+    reflectAll();
+    // 듣는 중에 언어를 바꾸면 새 언어로 다시 듣습니다.
+    if (S.live && S.phase === 'listening' && !S.noMic && prevLang !== S.myLang) {
+      stopListening();
+      resetHeard();
+      el.heard.textContent = '';
+      listen(true);
+    }
     el.sheet.hidden = true;
     el.set.focus();
   }
@@ -1045,7 +1165,7 @@ a { color: var(--go); }
     else if (/Safari\//.test(UA)) browser = 'Safari';
     const mic = { granted: '허용', denied: '차단', prompt: '매번 묻기', unknown: '확인 불가' }[st] || st;
     el.diag.textContent = [
-      '버전: 3',
+      '버전: 4',
       '브라우저: ' + browser,
       '말 알아듣기: ' + (Rec ? '지원' : '미지원'),
       '소리 답변: ' + (canSpeak ? '지원' : '미지원'),
@@ -1125,6 +1245,14 @@ a { color: var(--go); }
     }
   });
 
+  for (const [code, ko, native] of LANGS) {
+    for (const sel of [el.myLang, el.otherLang]) {
+      const o = document.createElement('option');
+      o.value = code;
+      o.textContent = ko === native ? ko : ko + ' (' + native + ')';
+      sel.append(o);
+    }
+  }
   showCompat();
   if (S.key) showLive(); else showSetup('');
 })();
