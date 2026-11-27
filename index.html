@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0E1512">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>라이브 묻기</title>
@@ -143,10 +146,16 @@ a { color: var(--go); }
 }
 .captions p { margin: 0; overflow-wrap: anywhere; }
 .heard { color: var(--muted); font-size: 17px; }
-.heard:empty, .answer:empty { display: none; }
+.heard:empty, .answer:empty, .check:empty { display: none; }
+.check { color: var(--go); font-size: 18px; }
 .answer { font-size: 21px; line-height: 1.6; white-space: pre-wrap; }
 .status { margin: 0; padding: 8px 16px 0; color: var(--warn); font-size: 16px; }
 .status:empty { display: none; }
+.usage { margin: 0; padding: 8px 16px 0; color: var(--warn); font-size: 16px; font-weight: 500; }
+.usage:empty { display: none; }
+.usage.stop { color: var(--stop); font-weight: 700; }
+.recheck { align-self: flex-start; margin: 8px 16px 0; }
+.main:disabled { opacity: .45; cursor: default; }
 .typed { display: flex; gap: 8px; padding: 10px 16px 0; }
 .typed input {
   flex: 1 1 auto; min-width: 0; min-height: 54px;
@@ -237,9 +246,12 @@ a { color: var(--go); }
     <div class="captions">
       <p class="heard" id="heard"></p>
       <p class="answer" id="answer" hidden></p>
+      <p class="check" id="check" hidden></p>
     </div>
   </div>
   <p class="status" id="status" role="status"></p>
+  <p class="usage" id="usage-note" role="status"></p>
+  <button class="plain recheck" type="button" id="recheck" hidden>다시 확인</button>
   <form class="typed" id="typed" hidden>
     <input id="typed-q" type="text" autocomplete="off" placeholder="여기에 물어볼 말을 넣으세요" aria-label="물어볼 말">
     <button type="submit">보내기</button>
@@ -249,11 +261,13 @@ a { color: var(--go); }
     <button class="main alt" type="button" id="btn-main2" hidden></button>
     <button class="ctl" type="button" id="btn-cam" aria-pressed="true">카메라</button>
     <button class="ctl" type="button" id="btn-flip">앞뒤 전환</button>
+    <button class="ctl" type="button" id="btn-torch" aria-pressed="false" hidden>조명</button>
     <button class="ctl" type="button" id="btn-screen" aria-pressed="false" hidden>화면 공유</button>
     <button class="ctl" type="button" id="btn-interp" aria-pressed="false">통역</button>
     <button class="ctl" type="button" id="btn-auto" aria-pressed="true">계속 듣기</button>
     <button class="ctl" type="button" id="btn-text" aria-pressed="false">글로 보기</button>
     <button class="ctl" type="button" id="btn-set">설정</button>
+    <button class="ctl" type="button" id="btn-install" hidden>앱으로 설치</button>
     <button class="ctl" type="button" id="btn-end" hidden>끝내기</button>
   </div>
 </main>
@@ -261,6 +275,7 @@ a { color: var(--go); }
 <div class="sheet" id="sheet" hidden>
   <div class="sheet-box" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
     <h2 id="sheet-title">설정</h2>
+    <p class="muted">홈 화면에 아이콘을 만들려면 Chrome 오른쪽 위 메뉴(⋮)에서 「홈 화면에 추가」를 누르세요. 화면 아래에 「앱으로 설치」 버튼이 보이면 그것을 눌러도 됩니다.</p>
     <div class="field">
       <label for="model">답하는 모델</label>
       <input id="model" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
@@ -294,13 +309,32 @@ a { color: var(--go); }
         <option value="1200">짧게 (1초쯤)</option>
         <option value="2000" selected>보통 (2초)</option>
         <option value="3000">길게 (3초)</option>
+        <option value="5000">아주 길게 (5초)</option>
+        <option value="60000">「다 말했어요」를 누를 때까지</option>
       </select>
-      <p class="muted">말하는 도중에 답이 먼저 나오면 길게로 바꾸세요. 듣는 중에 「다 말했어요」를 누르면 기다리지 않고 바로 보냅니다.</p>
+      <p class="muted">말하는 도중에 답이 먼저 나오면 더 길게 바꾸세요. 통역할 때는 여기서 고른 시간과 3.5초 중 긴 쪽만큼 기다립니다. 듣는 중에 「다 말했어요」를 누르면 기다리지 않고 바로 보냅니다.</p>
     </div>
     <div class="rowbtn">
       <button class="plain" type="button" id="clear-chat">대화 내용 지우기</button>
       <button class="plain" type="button" id="change-key">API 키 바꾸기</button>
       <button class="plain" type="button" id="delete-key">API 키 지우기</button>
+    </div>
+    <div class="field">
+      <label for="memory">대화 내용 기억</label>
+      <select id="memory">
+        <option value="none">기억하지 않기 (답할 때마다 바로 지움)</option>
+        <option value="short">2분 동안만 기억</option>
+        <option value="session">끝내기를 누를 때까지 기억</option>
+      </select>
+      <p class="muted">기억하지 않으면 "아까 그거"처럼 앞의 말을 가리키는 질문은 알아듣지 못합니다. 어느 쪽이든 대화와 사진은 휴대폰에 저장하지 않고, 끝내기를 누르면 모두 지웁니다. 답을 받으려고 Anthropic 서버로 보낸 내용은 여기서 지울 수 없고, 그쪽 규정에 따라 보통 30일 안에 자동으로 지워집니다.</p>
+    </div>
+    <div class="field">
+      <label for="budget">크레딧 한도 (달러)</label>
+      <input id="budget" type="number" inputmode="decimal" min="1" step="1">
+      <label for="reset-day">크레딧이 새로 들어오는 날 (매월 며칠)</label>
+      <input id="reset-day" type="number" inputmode="numeric" min="1" max="31" step="1">
+      <p class="muted" id="usage-detail"></p>
+      <p class="muted">이 기기에서 쓴 양을 요금표로 계산한 추정치입니다. 정확한 잔액은 Claude Console에서 확인하세요. 한도의 80%부터 알리고, 100%가 되면 사용을 막습니다.</p>
     </div>
     <div class="field">
       <button class="plain" type="button" id="test-sound">소리 시험</button>
@@ -318,13 +352,13 @@ a { color: var(--go); }
   const el = {
     setup: $('setup'), key: $('key'), saveKey: $('save-key'), setupError: $('setup-error'),
     live: $('live'), video: $('video'), stageEmpty: $('stage-empty'), pill: $('pill'),
-    heard: $('heard'), answer: $('answer'), status: $('status'),
+    heard: $('heard'), answer: $('answer'), check: $('check'), status: $('status'),
     typed: $('typed'), typedQ: $('typed-q'),
     main: $('btn-main'), cam: $('btn-cam'), flip: $('btn-flip'), screen: $('btn-screen'), text: $('btn-text'), set: $('btn-set'),
     sheet: $('sheet'), model: $('model'), rate: $('rate'),
     clearChat: $('clear-chat'), changeKey: $('change-key'), deleteKey: $('delete-key'), closeSheet: $('close-sheet'),
     compat: $('compat'), compatText: $('compat-text'), openChrome: $('open-chrome'),
-    pause: $('pause'), main2: $('btn-main2'), interp: $('btn-interp'), myLang: $('my-lang'), otherLang: $('other-lang'), auto: $('btn-auto'), end: $('btn-end'), testSound: $('test-sound'), testResult: $('test-result'), diag: $('diag'),
+    pause: $('pause'), install: $('btn-install'), usageNote: $('usage-note'), recheck: $('recheck'), memory: $('memory'), budget: $('budget'), resetDay: $('reset-day'), usageDetail: $('usage-detail'), torch: $('btn-torch'), main2: $('btn-main2'), interp: $('btn-interp'), myLang: $('my-lang'), otherLang: $('other-lang'), auto: $('btn-auto'), end: $('btn-end'), testSound: $('test-sound'), testResult: $('test-result'), diag: $('diag'),
   };
 
   const API = 'https://api.anthropic.com/v1/messages';
@@ -359,12 +393,16 @@ a { color: var(--go); }
     key: store.get('live-ask-key') || '',
     model: store.get('live-ask-model') || DEFAULT_MODEL,
     rate: Number(store.get('live-ask-rate')) || 1,
-    pauseMs: Number(store.get('live-ask-pause')) || 2000, pauseTimer: 0, pauseArmed: false, carry: '', heardNow: '',
+    pauseMs: Number(store.get('live-ask-pause')) || 2000, pauseTimer: 0, pauseArmed: false, carry: '', heardNow: '', lastHeardAt: 0,
     showText: store.get('live-ask-text') === 'on',
     auto: store.get('live-ask-auto') !== 'off', manualForced: false, idleEnds: 0,
     ttsDoubt: false, runSpoke: false,
     myLang: validLang(store.get('live-ask-lang'), 'ko-KR'), otherLang: validLang(store.get('live-ask-other'), 'en-US'),
-    interp: false, listenLang: '', outLang: '', interpLog: [], onceLang: '',
+    interp: false, listenLang: '', outLang: '', interpLog: [], onceLang: '', transView: false,
+    memory: ['none', 'short', 'session'].indexOf(store.get('live-ask-memory')) >= 0 ? store.get('live-ask-memory') : 'none',
+    budget: Number(store.get('live-ask-budget')) || 100,
+    resetDay: Math.min(31, Math.max(1, Math.round(Number(store.get('live-ask-reset')) || 15))),
+    memTimer: 0, screenTimer: 0, sheetPaused: false, torchOn: false, canTorch: false,
     camOn: true, facing: 'environment',
     live: false, phase: 'idle', run: 0,
     cam: null, shared: null,
@@ -379,10 +417,10 @@ a { color: var(--go); }
 
   const RULES = [
     '당신은 휴대폰 카메라로 비추면서 말로 묻는 사람과 실시간으로 대화하는 도우미입니다. 이 사람은 스마트폰에 익숙하지 않을 수 있습니다.',
-    '한국어 존댓말로, 쉬운 낱말로, 한두 문장에서 세 문장 사이로 짧게 답합니다. 더 알고 싶어 하면 그때 이어서 설명합니다.',
+    '한국어 존댓말로, 쉬운 낱말로, 한두 문장에서 세 문장 사이로 짧게 답합니다. 더 알고 싶어 하면 그때 이어서 설명합니다. 다만 적힌 글을 읽어 달라거나 옮겨 달라는 부탁에는 길이를 줄이지 말고 필요한 만큼 답합니다.',
     '답은 소리로 읽히므로 기호, 목록, 굵은 글씨, 이모지를 쓰지 않고 이어지는 문장으로만 씁니다.',
     '사용자의 말은 음성 인식을 거쳐 오므로 낱말이 조금 틀릴 수 있습니다. 뜻을 헤아려 답하고, 정말 모르겠으면 다시 말해 달라고 합니다.',
-    '사진이 함께 오면 그것이 사용자가 말을 마친 순간의 카메라 화면입니다. 실제로 보이는 것만 근거로 답하고, 흐리거나 잘려서 안 보이면 그렇게 말하고 더 가까이 비춰 달라고 합니다. 사진이 없으면 카메라가 꺼져 있는 것입니다.',
+    '사진이 함께 오면 그것이 사용자가 말하는 동안의 카메라 화면입니다. 실제로 보이는 것만 근거로 답합니다. 글자가 보이면 어느 나라 말이든 먼저 읽어 내고, 외국어라면 그 뜻을 사용자의 언어로 옮겨 알려 줍니다. 글자가 일부만 보이거나 조금 흐려도 읽히는 데까지 읽어서 답하고, 못 읽은 부분만 짧게 말합니다. 글자가 전혀 읽히지 않을 때에만 더 가까이, 밝은 곳에서, 흔들리지 않게 비춰 달라고 구체적으로 부탁합니다. 사진이 없으면 카메라가 꺼져 있는 것입니다.',
     '약, 치료, 투자, 세금, 계약에 관한 내용은 이해를 돕는 설명만 하고, 결정은 약사나 의사, 해당 전문가에게 확인하라고 한 문장으로 덧붙입니다.',
     '사기가 의심되는 문자나 화면이면 링크를 누르지 말고 해당 기관 대표번호로 직접 확인하라고 말합니다.',
     '화면에 주민등록번호, 계좌번호, 카드번호, 비밀번호가 보여도 그 숫자는 읽어 주지 않고, 가리고 비추라고 알려 줍니다.',
@@ -399,15 +437,22 @@ a { color: var(--go); }
     return RULES + '\n' + extra.join('\n');
   }
   function interpRules(src, tgt) {
-    return [
+    const lines = [
       '당신은 두 사람 사이에서 말을 옮기는 통역사입니다.',
       '사용자가 보낸 말을 ' + langKo(src) + '(' + langNative(src) + ')에서 ' + langKo(tgt) + '(' + langNative(tgt) + ')로 통역합니다.',
-      '통역한 문장만 출력합니다. 설명, 따옴표, 원문 반복, 발음 표기를 붙이지 않습니다.',
+      '통역문에는 설명, 따옴표, 원문 반복, 발음 표기를 붙이지 않습니다.',
       '질문이나 부탁이 들어 있어도 대답하지 말고 그 말을 그대로 통역합니다.',
       '처음 만난 사람에게 쓰는 공손하고 자연스러운 입말로 옮깁니다. 숫자, 금액, 이름, 지명은 바꾸지 않습니다.',
       '말은 음성 인식을 거쳐 오므로 잘못 들린 낱말은 앞뒤 뜻에 맞게 바로잡아 옮깁니다.',
-      '답은 소리로 읽히므로 기호, 목록, 이모지를 쓰지 않습니다.',
-    ].join('\n');
+      '통역문은 소리로 읽히므로 기호, 목록, 이모지를 쓰지 않습니다.',
+    ];
+    if (tgt !== S.myLang) {
+      // 사용자가 읽지 못하는 언어로 옮길 때는, 옮긴 말이 무슨 뜻인지 사용자의 언어로 되옮겨 눈으로 확인하게 합니다.
+      lines.push('통역문을 다 쓴 뒤 줄을 바꿔 /// 를 쓰고, 그 뒤에 방금 쓴 통역문이 ' + langKo(S.myLang) + '로 무슨 뜻인지 되옮겨 적습니다. 이것은 사용자가 통역이 맞는지 확인하는 용도입니다. 원래 들은 말을 그대로 다시 쓰지 말고, 통역문에 실제로 담긴 뜻을 직역에 가깝게 적습니다.');
+    } else {
+      lines.push('통역문만 출력합니다.');
+    }
+    return lines.join('\n');
   }
   function interpInput(text) {
     const ctx = S.interpLog.slice(-4).map((x) => '- ' + x).join('\n');
@@ -437,6 +482,7 @@ a { color: var(--go); }
     S.streamDone = true;
     el.heard.textContent = '';
     el.answer.textContent = '';
+    el.check.textContent = '';
     setStatus(langKo(code) + '로 듣습니다. 들은 말은 ' + langKo(S.myLang) + '로 옮겨 드립니다.');
     setPhase('speaking');
     say(S.myLang === 'ko-KR' ? langKo(code) + '로 말씀하세요.' : langNative(code), run);
@@ -496,16 +542,20 @@ a { color: var(--go); }
   }
   function reflectAll() {
     el.cam.setAttribute('aria-pressed', String(S.camOn));
-    const textOn = S.showText || !canSpeak || S.ttsDoubt || S.interp;
+    const textOn = S.showText || !canSpeak || S.ttsDoubt || S.interp || S.transView;
     el.text.setAttribute('aria-pressed', String(textOn));
     el.answer.hidden = !textOn;
+    el.check.hidden = !textOn;
     el.auto.setAttribute('aria-pressed', String(S.auto && !S.manualForced));
     el.auto.hidden = S.noMic || S.interp;
     el.interp.setAttribute('aria-pressed', String(S.interp));
     el.screen.hidden = !canShareScreen;
     el.screen.setAttribute('aria-pressed', String(!!S.shared));
     el.flip.disabled = !S.camOn || !!S.shared;
+    el.torch.hidden = !(S.live && S.cam && S.canTorch && !S.shared);
+    el.torch.setAttribute('aria-pressed', String(!!S.torchOn));
     setPhase(S.phase);
+    reflectUsage();
   }
 
   /* ---------- 카메라와 화면 공유 ---------- */
@@ -515,6 +565,8 @@ a { color: var(--go); }
   }
   function showSource() {
     const src = S.shared || S.cam;
+    best = null;
+    if (!S.cam) { S.torchOn = false; S.canTorch = false; }
     el.video.srcObject = src || null;
     el.stageEmpty.hidden = !!src;
     if (!src) {
@@ -538,9 +590,10 @@ a { color: var(--go); }
     }
     try {
       S.cam = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: S.facing }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: { ideal: S.facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       });
+      tuneCamera(S.cam);
       if (!S.live || !S.camOn) { stopStream(S.cam); S.cam = null; }
     } catch (e) {
       S.camOn = false;
@@ -565,21 +618,82 @@ a { color: var(--go); }
     showSource();
     reflectAll();
   }
-  function grabFrame() {
+  /* ---------- 보낼 화면 고르기 ---------- */
+  /* 말하는 동안 화면을 여러 번 살펴서 가장 또렷한 장면을 보냅니다. 흔들린 순간이 찍혀 글자를 못 읽는 일을 줄입니다. */
+  const probe = document.createElement('canvas');
+  let best = null; // { canvas, score, at }
+  let sampler = 0;
+  function sharpnessOf(v) {
+    const w = 192;
+    const h = Math.max(3, Math.round(w * v.videoHeight / v.videoWidth));
+    probe.width = w;
+    probe.height = h;
+    const ctx = probe.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(v, 0, 0, w, h);
+    const d = ctx.getImageData(0, 0, w, h).data;
+    const g = new Float32Array(w * h);
+    for (let i = 0, j = 0; i < d.length; i += 4, j += 1) g[j] = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    let sum = 0;
+    let sum2 = 0;
+    let n = 0;
+    for (let y = 1; y < h - 1; y += 1) {
+      for (let x = 1; x < w - 1; x += 1) {
+        const k = y * w + x;
+        const lap = 4 * g[k] - g[k - 1] - g[k + 1] - g[k - w] - g[k + w];
+        sum += lap;
+        sum2 += lap * lap;
+        n += 1;
+      }
+    }
+    if (!n) return 0;
+    const mean = sum / n;
+    return sum2 / n - mean * mean;
+  }
+  function sampleFrame() {
     const v = el.video;
-    if (!v.srcObject || !v.videoWidth || !v.videoHeight) return null;
+    if (!v.srcObject || !v.videoWidth || !v.videoHeight) return;
     try {
-      const k = Math.min(1, 1024 / Math.max(v.videoWidth, v.videoHeight));
-      const c = document.createElement('canvas');
+      const score = sharpnessOf(v);
+      const now = Date.now();
+      // 훨씬 또렷한 장면이 4초 안에 있으면 그것을 지키고, 아니면 지금 장면으로 바꿉니다.
+      if (best && now - best.at < 4000 && score < best.score * 0.9) return;
+      const k = Math.min(1, 2000 / Math.max(v.videoWidth, v.videoHeight));
+      const c = best ? best.canvas : document.createElement('canvas');
       c.width = Math.max(1, Math.round(v.videoWidth * k));
       c.height = Math.max(1, Math.round(v.videoHeight * k));
       c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-      const url = c.toDataURL('image/jpeg', 0.8);
+      best = { canvas: c, score, at: now };
+    } catch (e) { /* 이번 장면은 건너뜁니다 */ }
+  }
+  function grabFrame() {
+    sampleFrame();
+    const chosen = best;
+    best = null;
+    if (!chosen) return null;
+    try {
+      // 글자가 뭉개지지 않게 크게, 덜 압축해서 보냅니다.
+      const url = chosen.canvas.toDataURL('image/jpeg', 0.92);
+      // 보낼 그림을 만든 뒤에는 화면 사본을 바로 비웁니다.
+      chosen.canvas.width = 0;
+      chosen.canvas.height = 0;
       const i = url.indexOf(',');
       return i > 0 ? url.slice(i + 1) : null;
     } catch (e) {
       return null;
     }
+  }
+  function tuneCamera(stream) {
+    S.torchOn = false;
+    S.canTorch = false;
+    try {
+      const track = stream && stream.getVideoTracks()[0];
+      if (!track || !track.getCapabilities) return;
+      const caps = track.getCapabilities();
+      if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) {
+        track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+      }
+      S.canTorch = !!caps.torch;
+    } catch (e) { /* 초점과 조명 조절 없이 씁니다 */ }
   }
 
   /* ---------- 듣기 ---------- */
@@ -598,14 +712,18 @@ a { color: var(--go); }
   function clearPause() { window.clearTimeout(S.pauseTimer); S.pauseArmed = false; }
   function resetHeard() { clearPause(); S.carry = ''; S.heardNow = ''; }
   /* 말이 멈춘 뒤 정해 둔 시간만큼 더 기다렸다가 보냅니다. 그 사이에 말이 이어지면 처음부터 다시 기다립니다. */
-  function armPause() {
+  /* 통역할 때는 긴 말 중간의 숨 고르기에 끊기지 않도록 더 오래 기다립니다. */
+  function pauseFor() {
+    return (S.interp || S.onceLang) ? Math.max(S.pauseMs, 3500) : S.pauseMs;
+  }
+  function armPause(ms) {
     window.clearTimeout(S.pauseTimer);
     S.pauseArmed = true;
     S.pauseTimer = window.setTimeout(() => {
       S.pauseArmed = false;
       if (!S.live || S.phase !== 'listening') return;
       finishUtterance();
-    }, S.pauseMs);
+    }, ms || pauseFor());
   }
   function finishUtterance() {
     const text = String(S.heardNow || '').trim();
@@ -624,6 +742,7 @@ a { color: var(--go); }
   }
   function micBlocked(msg) {
     S.noMic = true;
+    S.onceLang = '';
     resetHeard();
     setStatus(msg);
     setPhase('listening');
@@ -655,7 +774,13 @@ a { color: var(--go); }
       }
       S.heardNow = joinText(S.carry, mergeHeard(sessionFinal, interim));
       el.heard.textContent = S.heardNow;
-      if (S.heardNow) armPause();
+      if (S.heardNow) { S.lastHeardAt = Date.now(); armPause(); }
+    };
+    // 휴대폰의 음성 인식은 말 중간에 스스로 끝나기도 합니다. 다시 켜진 순간부터 충분히 더 듣고 나서 보냅니다.
+    r.onstart = () => {
+      if (dead.has(r) || !S.live || S.phase !== 'listening' || !S.heardNow) return;
+      const floor = (S.interp || S.onceLang) ? 2000 : 1200;
+      armPause(Math.max(floor, pauseFor() - (Date.now() - S.lastHeardAt)));
     };
     r.onerror = (ev) => { errCode = ev.error || 'error'; };
     r.onend = () => {
@@ -669,8 +794,8 @@ a { color: var(--go); }
         S.heardNow = S.carry;
         S.failCount = 0;
         S.idleEnds = 0;
-        if (!S.pauseArmed) armPause();
-        window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(true); }, 150);
+        armPause();
+        window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(true); }, 30);
         return;
       }
       if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
@@ -793,7 +918,7 @@ a { color: var(--go); }
   }
   /* 문장이 끝날 때마다 바로 읽어서, 답이 다 오기 전에 말이 시작되게 합니다. */
   function speakReady(buf, run, final) {
-    const re = /[.!?…]+["')\]]*\s+|\n+/g;
+    const re = /[.!?…]+["')\]]*\s+|[。！？]+[」』”’)]*\s*|\n+/g;
     let last = 0;
     while (re.exec(buf) !== null) {
       const s = buf.slice(last, re.lastIndex).trim();
@@ -816,22 +941,113 @@ a { color: var(--go); }
     }
   }
 
+  /* ---------- 크레딧 사용량 ---------- */
+  /* 남은 크레딧을 알려 주는 창구가 없어서, 이 기기에서 쓴 양을 요금표로 계산해 어림합니다. 실제로 다 쓰면 서버가 알려 주고, 그때도 막습니다. */
+  function priceFor(model) {
+    const m = String(model || '').toLowerCase();
+    if (m.indexOf('haiku') >= 0) return [0.10, 0.50]; // 100만 토큰당 달러: 입력, 출력
+    if (m.indexOf('sonnet') >= 0) return [2, 10];
+    return [4, 20]; // 그 밖의 모델은 넉넉하게 잡습니다
+  }
+  function daysIn(y, m) { return new Date(y, m + 1, 0).getDate(); }
+  function cycle(now) {
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    let start = new Date(y, m, Math.min(S.resetDay, daysIn(y, m)));
+    if (now < start) {
+      const p = new Date(y, m - 1, 1);
+      start = new Date(p.getFullYear(), p.getMonth(), Math.min(S.resetDay, daysIn(p.getFullYear(), p.getMonth())));
+    }
+    const n = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+    const next = new Date(n.getFullYear(), n.getMonth(), Math.min(S.resetDay, daysIn(n.getFullYear(), n.getMonth())));
+    const key = start.getFullYear() + '-' + String(start.getMonth() + 1).padStart(2, '0') + '-' + String(start.getDate()).padStart(2, '0');
+    return { key, next };
+  }
+  function loadUsage() {
+    const c = cycle(new Date());
+    let u = null;
+    try { u = JSON.parse(store.get('live-ask-usage') || 'null'); } catch (e) { u = null; }
+    if (!u || u.period !== c.key || typeof u.usd !== 'number') u = { period: c.key, usd: 0, n: 0 };
+    return u;
+  }
+  function addUsage(model, inTok, outTok) {
+    const price = priceFor(model);
+    const u = loadUsage();
+    u.usd += (inTok * price[0] + outTok * price[1]) / 1e6;
+    u.n += 1;
+    store.set('live-ask-usage', JSON.stringify(u));
+    reflectUsage();
+  }
+  function usageState() {
+    const c = cycle(new Date());
+    const u = loadUsage();
+    const ratio = S.budget > 0 ? u.usd / S.budget : 0;
+    const apiBlocked = store.get('live-ask-blocked') === c.key;
+    return { u, c, ratio, apiBlocked, blocked: apiBlocked || ratio >= 1 };
+  }
+  function nextResetText(c) { return (c.next.getMonth() + 1) + '월 ' + c.next.getDate() + '일'; }
+  function reflectUsage() {
+    const st = usageState();
+    const pct = Math.round(st.ratio * 100);
+    let note = '';
+    if (st.apiBlocked) note = '크레딧을 모두 써서 사용을 막았습니다. ' + nextResetText(st.c) + '에 새 크레딧이 들어오면 다시 쓸 수 있습니다.';
+    else if (st.ratio >= 1) note = '이 기기에서 쓴 양이 정해 둔 한도 ' + S.budget + '달러에 닿아 사용을 막았습니다. ' + nextResetText(st.c) + '에 다시 풀립니다.';
+    else if (st.ratio >= 0.95) note = '크레딧을 거의 다 썼습니다. 한도의 ' + pct + '%를 썼습니다. (추정)';
+    else if (st.ratio >= 0.8) note = '크레딧이 얼마 남지 않았습니다. 한도의 ' + pct + '%를 썼습니다. (추정)';
+    el.usageNote.textContent = note;
+    el.usageNote.className = 'usage' + (st.blocked ? ' stop' : '');
+    el.recheck.hidden = !st.blocked;
+    el.main.disabled = st.blocked && !S.live;
+    return st;
+  }
+  function usageDetailText() {
+    const st = usageState();
+    return '이번 기간 사용 추정: ' + st.u.usd.toFixed(st.u.usd < 1 ? 4 : 2) + '달러 / ' + S.budget + '달러 (' + Math.round(st.ratio * 100) + '%) · 질문 ' + st.u.n + '번 · 다음 충전일 ' + nextResetText(st.c);
+  }
+
+  /* ---------- 기록 지우기 ---------- */
+  /* 대화와 사진은 휴대폰에 저장하지 않습니다. 페이지가 열려 있는 동안 기억하는 내용도 설정에 따라 바로 지웁니다. */
+  function wipeMemory() {
+    window.clearTimeout(S.memTimer);
+    S.history = [];
+    S.interpLog = [];
+  }
+  function wipeScreen() {
+    el.heard.textContent = '';
+    el.answer.textContent = '';
+    el.check.textContent = '';
+  }
+  function afterAnswerMemory() {
+    window.clearTimeout(S.memTimer);
+    window.clearTimeout(S.screenTimer);
+    if (S.memory === 'none') {
+      wipeMemory();
+      // 답을 확인할 시간을 준 뒤 화면의 글도 지웁니다.
+      S.screenTimer = window.setTimeout(() => {
+        if (S.phase !== 'thinking' && S.phase !== 'speaking' && !S.heardNow) wipeScreen();
+      }, 60000);
+    } else if (S.memory === 'short') {
+      S.memTimer = window.setTimeout(wipeMemory, 120000);
+    }
+  }
+
   /* ---------- Claude에게 묻기 ---------- */
   async function apiError(resp) {
     let j = null;
     try { j = await resp.json(); } catch (e) { j = null; }
     const msg = (j && j.error && j.error.message) || '';
+    const type = (j && j.error && j.error.type) || '';
     const err = new Error(msg || ('HTTP ' + resp.status));
     if (resp.status === 401) { err.userMessage = 'API 키가 맞지 않습니다. 키를 다시 넣어 주세요.'; err.needKey = true; }
     else if (resp.status === 403) { err.userMessage = '이 키로는 사용할 수 없습니다. Console에서 키 권한을 확인해 주세요.'; err.fatal = true; }
     else if (resp.status === 404) { err.userMessage = '모델 이름을 찾지 못했습니다. 설정에서 답하는 모델을 확인해 주세요.'; err.fatal = true; }
     else if (resp.status === 429) { err.userMessage = '요청이 많아 잠시 쉬어야 합니다. 조금 뒤에 다시 물어보세요.'; }
-    else if (resp.status === 400 && /credit/i.test(msg)) { err.userMessage = 'API 크레딧이 부족합니다. Console에서 충전한 뒤 다시 시작해 주세요.'; err.fatal = true; }
+    else if (resp.status === 402 || type === 'billing_error' || (resp.status === 400 && /credit/i.test(msg))) { err.userMessage = '크레딧을 모두 썼습니다.'; err.credit = true; err.fatal = true; }
     else if (resp.status === 400) { err.userMessage = '요청이 거절되었습니다. ' + msg.slice(0, 140); }
     else if (resp.status >= 500) { err.userMessage = 'Claude 서버가 바쁩니다. 조금 뒤에 다시 물어보세요.'; }
     return err;
   }
-  async function readStream(resp, onDelta) {
+  async function readStream(resp, onDelta, onUsage) {
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
@@ -848,6 +1064,12 @@ a { color: var(--go); }
           let j = null;
           try { j = JSON.parse(line.slice(5).trim()); } catch (e) { j = null; }
           if (!j) continue;
+          if (j.type === 'message_start' && j.message && j.message.usage && onUsage) {
+            const u = j.message.usage;
+            onUsage({ inTok: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0) });
+          } else if (j.type === 'message_delta' && j.usage && onUsage) {
+            onUsage({ outTok: j.usage.output_tokens || 0 });
+          }
           if (j.type === 'content_block_delta' && j.delta && j.delta.type === 'text_delta' && j.delta.text) onDelta(j.delta.text);
           else if (j.type === 'error') {
             const err = new Error((j.error && j.error.message) || 'stream error');
@@ -872,6 +1094,7 @@ a { color: var(--go); }
     setStatus('');
     el.heard.textContent = text;
     el.answer.textContent = '';
+    el.check.textContent = '';
     const interp = S.interp;
     const once = interp ? '' : S.onceLang;
     S.onceLang = '';
@@ -879,6 +1102,10 @@ a { color: var(--go); }
     const src = interp ? (S.listenLang || S.myLang) : (once || S.myLang);
     const tgt = interp ? (src === S.myLang ? S.otherLang : S.myLang) : S.myLang;
     S.outLang = tgt;
+    // 옮기는 말은 잘못 들었거나 잘못 옮겼는지 볼 수 있게 항상 글로도 보여 줍니다.
+    S.transView = translating;
+    if (translating) el.heard.textContent = '들은 말 (' + langKo(src) + '): ' + text;
+    reflectAll();
     if (!translating) {
       const code = detectListenCommand(text);
       if (code) { startOnce(code, run); return; }
@@ -892,11 +1119,15 @@ a { color: var(--go); }
       ? [{ role: 'user', content: interpInput(text) }]
       : S.history.slice(-10).concat([{ role: 'user', content }]);
     const system = translating ? interpRules(src, tgt) : rulesFor(S.myLang);
+    if (usageState().blocked) { stopLive(); reflectUsage(); return; }
+    window.clearTimeout(S.screenTimer);
     const ctl = new AbortController();
     S.ctl = ctl;
     S.streamDone = false;
     let full = '';
     let buf = '';
+    let inTok = 0;
+    let outTok = 0;
     try {
       const resp = await fetch(API, {
         method: 'POST',
@@ -907,20 +1138,41 @@ a { color: var(--go); }
           'anthropic-version': '2023-06-01',
           'anthropic-dangerous-direct-browser-access': 'true',
         },
-        body: JSON.stringify({ model: S.model, max_tokens: 500, system, stream: true, messages }),
+        body: JSON.stringify({ model: S.model, max_tokens: 900, system, stream: true, messages }),
       });
       if (!resp.ok) throw await apiError(resp);
       let held = false;
+      let fed = 0;
       await readStream(resp, (delta) => {
         if (run !== S.run) return;
         full += delta;
         // [[listen:...]] 표시일 수 있는 답은 끝까지 받은 뒤에 처리합니다.
         if (!translating && /^\s*\[/.test(full)) { held = true; return; }
-        el.answer.textContent = full;
         if (S.phase === 'thinking') setPhase('speaking');
-        buf = speakReady(buf + delta, run, false);
+        if (!translating) {
+          el.answer.textContent = full;
+          buf = speakReady(buf + delta, run, false);
+          return;
+        }
+        // 통역문 뒤에 /// 와 뜻 확인용 되옮김이 올 수 있습니다. 소리로는 통역문만 읽습니다.
+        const cut = full.indexOf('///');
+        const said = cut >= 0 ? full.slice(0, cut) : full.replace(/[\s\/]+$/, '');
+        if (said.length > fed) { buf = speakReady(buf + said.slice(fed), run, false); fed = said.length; }
+        el.answer.textContent = said.trim();
+        const back = cut >= 0 ? full.slice(cut + 3).trim() : '';
+        el.check.textContent = back ? '뜻 확인 (' + langKo(S.myLang) + '): ' + back : '';
+      }, (use) => {
+        if (use.inTok) inTok = use.inTok;
+        if (use.outTok) outTok = use.outTok;
       });
       if (run !== S.run) return;
+      if (translating) {
+        const cut = full.indexOf('///');
+        const said = cut >= 0 ? full.slice(0, cut) : full;
+        if (said.length > fed) buf += said.slice(fed);
+        el.answer.textContent = said.trim();
+        full = said.trim();
+      }
       if (held) {
         const m = full.match(/\[\[listen:([A-Za-z]{2}-[A-Za-z]{2})\]\]/);
         const code = m ? validLang(m[1], '') : '';
@@ -942,6 +1194,7 @@ a { color: var(--go); }
       } else {
         setStatus('답을 받지 못했습니다. 다시 물어보세요.');
       }
+      afterAnswerMemory();
       S.streamDone = true;
       // 읽기가 끝났다는 신호가 안 오는 브라우저가 있어, 시간이 지나면 다시 듣기로 넘어갑니다.
       window.clearTimeout(S.watchdog);
@@ -963,11 +1216,13 @@ a { color: var(--go); }
       if (e && e.name === 'AbortError') return;
       const msg = (e && e.userMessage) || '연결이 끊겼습니다. 인터넷을 확인하고 다시 물어보세요.';
       if (e && e.needKey) { showSetup(msg); return; }
+      if (e && e.credit) { store.set('live-ask-blocked', cycle(new Date()).key); stopLive(); setStatus(''); reflectUsage(); return; }
       if (e && e.fatal) { stopLive(); setStatus(msg); return; }
       setStatus(msg);
       maybeResume(run);
     } finally {
       if (S.ctl === ctl) S.ctl = null;
+      if (inTok || outTok) addUsage(S.model, inTok, outTok);
     }
   }
 
@@ -1000,7 +1255,7 @@ a { color: var(--go); }
       reflectAll();
       return;
     }
-    const video = { facingMode: { ideal: S.facing }, width: { ideal: 1280 }, height: { ideal: 720 } };
+    const video = { facingMode: { ideal: S.facing }, width: { ideal: 1920 }, height: { ideal: 1080 } };
     let both = null;
     if (wantMic && wantCam) {
       try { both = await md.getUserMedia({ video, audio: true }); } catch (e) { both = null; }
@@ -1008,6 +1263,7 @@ a { color: var(--go); }
     if (both) {
       for (const t of both.getAudioTracks()) { try { t.stop(); both.removeTrack(t); } catch (e) { /* 이미 멈춤 */ } }
       S.cam = both;
+      tuneCamera(S.cam);
     } else {
       if (wantMic) {
         try {
@@ -1021,6 +1277,7 @@ a { color: var(--go); }
       if (wantCam) {
         try {
           S.cam = await md.getUserMedia({ video, audio: false });
+          tuneCamera(S.cam);
         } catch (e) {
           S.camOn = false;
           addStatus(e && e.name === 'NotAllowedError'
@@ -1037,6 +1294,7 @@ a { color: var(--go); }
   }
   async function startLive() {
     if (S.live) return;
+    if (reflectUsage().blocked) return;
     S.live = true;
     S.failCount = 0;
     S.idleEnds = 0;
@@ -1059,11 +1317,21 @@ a { color: var(--go); }
       }
     }
     reflectAll();
+    window.clearInterval(sampler);
+    sampler = window.setInterval(() => {
+      if (S.live && S.phase === 'listening' && S.heardNow && !S.interp && !S.onceLang) sampleFrame();
+    }, 450);
     listen();
   }
   function stopLive() {
     const was = S.live;
     S.live = false;
+    window.clearInterval(sampler);
+    window.clearTimeout(S.screenTimer);
+    wipeMemory();
+    S.transView = false;
+    probe.width = 0;
+    probe.height = 0;
     S.onceLang = '';
     S.run += 1;
     if (S.ctl) { try { S.ctl.abort(); } catch (e) { /* 이미 끝남 */ } }
@@ -1075,7 +1343,7 @@ a { color: var(--go); }
     if (S.wake) { try { S.wake.release(); } catch (e) { /* 이미 풀림 */ } S.wake = null; }
     showSource();
     el.heard.textContent = '';
-    if (was) el.answer.textContent = '';
+    if (was) { el.answer.textContent = ''; el.check.textContent = ''; }
     S.phase = 'idle';
     reflectAll();
   }
@@ -1088,13 +1356,21 @@ a { color: var(--go); }
     el.heard.textContent = '';
     S.streamDone = true;
     S.idleEnds = 0;
+    if (S.interp) { setPhase('ready'); return; }
     listen(true);
   }
 
   /* ---------- 버튼 ---------- */
   el.main.addEventListener('click', () => {
     if (!S.live) { startLive(); return; }
-    if (S.phase === 'ready') { S.idleEnds = 0; setStatus(''); primeSpeech(); S.listenLang = S.myLang; listen(true); return; }
+    if (S.phase === 'ready') {
+      S.idleEnds = 0;
+      setStatus(S.interp ? '말이 끝나면 「다 말했어요」를 누르세요. 누르지 않아도 잠시 조용하면 옮깁니다.' : '');
+      primeSpeech();
+      S.listenLang = S.myLang;
+      listen(true);
+      return;
+    }
     if (S.phase === 'prep' || (S.phase === 'listening' && S.noMic)) { stopLive(); setStatus(''); return; }
     if (S.phase === 'listening') {
       if (!finishUtterance()) setStatus('아직 들은 말이 없습니다. 말씀하신 뒤에 눌러 주세요.');
@@ -1104,10 +1380,25 @@ a { color: var(--go); }
     interrupt();
   });
   el.end.addEventListener('click', () => { stopLive(); setStatus(''); });
+  el.recheck.addEventListener('click', () => {
+    store.del('live-ask-blocked');
+    const st = reflectUsage();
+    if (st.blocked) setStatus('한도는 설정의 「크레딧 한도」에서 바꿀 수 있습니다. Console에 크레딧이 남아 있을 때만 올려 주세요.');
+    else setStatus('막힘을 풀었습니다. 시작을 눌러 다시 써 보세요. 크레딧이 아직 없으면 다시 막힙니다.');
+  });
+  el.torch.addEventListener('click', () => {
+    const track = S.cam && S.cam.getVideoTracks()[0];
+    if (!track) return;
+    const want = !S.torchOn;
+    track.applyConstraints({ advanced: [{ torch: want }] }).then(() => {
+      S.torchOn = want;
+      reflectAll();
+    }).catch(() => { setStatus('이 카메라에서는 조명을 켤 수 없습니다.'); });
+  });
   el.main2.addEventListener('click', () => {
     if (!S.live || S.phase !== 'ready' || !S.interp) return;
     S.idleEnds = 0;
-    setStatus('');
+    setStatus('말이 끝나면 「다 말했어요」를 누르세요. 누르지 않아도 잠시 조용하면 옮깁니다.');
     primeSpeech();
     S.listenLang = S.otherLang;
     listen(true);
@@ -1116,6 +1407,8 @@ a { color: var(--go); }
     S.interp = !S.interp;
     S.listenLang = S.myLang;
     S.onceLang = '';
+    S.transView = false;
+    window.clearTimeout(S.screenTimer);
     if (S.live) {
       S.run += 1;
       if (S.ctl) { try { S.ctl.abort(); } catch (e) { /* 이미 끝남 */ } }
@@ -1125,6 +1418,7 @@ a { color: var(--go); }
       S.streamDone = true;
       el.heard.textContent = '';
       el.answer.textContent = '';
+      el.check.textContent = '';
       setStatus(S.interp ? '통역을 켰습니다. 말할 사람 쪽 버튼을 누르고 말하면 상대 언어로 옮겨서 읽어 줍니다.' : '');
       reflectAll();
       listen();
@@ -1164,7 +1458,7 @@ a { color: var(--go); }
   el.typed.addEventListener('submit', (e) => {
     e.preventDefault();
     const t = el.typedQ.value.trim();
-    if (!t || !S.live) return;
+    if (!t || !S.live || S.phase === 'prep') return;
     el.typedQ.value = '';
     primeSpeech();
     S.listenLang = S.myLang;
@@ -1172,10 +1466,23 @@ a { color: var(--go); }
   });
 
   el.set.addEventListener('click', () => {
+    // 설정을 만지는 동안 주변 말소리가 질문으로 보내지지 않게 듣기를 멈춥니다.
+    S.sheetPaused = S.live && S.phase === 'listening' && !S.noMic;
+    if (S.sheetPaused) {
+      S.onceLang = '';
+      stopListening();
+      resetHeard();
+      el.heard.textContent = '';
+      setPhase('ready');
+    }
     el.model.value = S.model;
     el.rate.value = String(S.rate);
     el.pause.value = String(S.pauseMs);
     el.myLang.value = S.myLang;
+    el.memory.value = S.memory;
+    el.budget.value = String(S.budget);
+    el.resetDay.value = String(S.resetDay);
+    el.usageDetail.textContent = usageDetailText();
     el.otherLang.value = S.otherLang;
     el.testResult.textContent = '';
     fillDiag();
@@ -1190,23 +1497,54 @@ a { color: var(--go); }
     store.set('live-ask-rate', String(S.rate));
     S.pauseMs = Number(el.pause.value) || 2000;
     store.set('live-ask-pause', String(S.pauseMs));
-    const prevLang = S.myLang;
     S.myLang = validLang(el.myLang.value, 'ko-KR');
     S.otherLang = validLang(el.otherLang.value, 'en-US');
     if (S.otherLang === S.myLang) S.otherLang = S.myLang === 'en-US' ? 'ko-KR' : 'en-US';
     store.set('live-ask-lang', S.myLang);
     store.set('live-ask-other', S.otherLang);
+    S.memory = ['none', 'short', 'session'].indexOf(el.memory.value) >= 0 ? el.memory.value : 'none';
+    store.set('live-ask-memory', S.memory);
+    if (S.memory === 'none') wipeMemory();
+    S.budget = Number(el.budget.value) > 0 ? Number(el.budget.value) : 100;
+    store.set('live-ask-budget', String(S.budget));
+    S.resetDay = Math.min(31, Math.max(1, Math.round(Number(el.resetDay.value) || 15)));
+    store.set('live-ask-reset', String(S.resetDay));
+    if (S.interp) S.listenLang = S.myLang;
     reflectAll();
-    // 듣는 중에 언어를 바꾸면 새 언어로 다시 듣습니다.
-    if (S.live && S.phase === 'listening' && !S.noMic && prevLang !== S.myLang) {
-      stopListening();
-      resetHeard();
-      el.heard.textContent = '';
+    // 설정을 열기 전에 듣고 있었다면, 바뀐 설정으로 다시 듣습니다. 누를 때만 듣기와 통역에서는 버튼을 기다립니다.
+    const resume = S.sheetPaused;
+    S.sheetPaused = false;
+    if (resume && S.live && S.phase === 'ready' && !S.noMic && !isManual()) {
+      S.idleEnds = 0;
       listen(true);
     }
     el.sheet.hidden = true;
     el.set.focus();
   }
+  /* ---------- 홈 화면 앱 ---------- */
+  let installEvent = null;
+  const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    installEvent = e;
+    el.install.hidden = standalone;
+  });
+  window.addEventListener('appinstalled', () => {
+    installEvent = null;
+    el.install.hidden = true;
+    setStatus('홈 화면에 추가했습니다. 이제 아이콘을 눌러 바로 열 수 있습니다.');
+  });
+  el.install.addEventListener('click', () => {
+    if (!installEvent) return;
+    const ev = installEvent;
+    installEvent = null;
+    el.install.hidden = true;
+    try { ev.prompt(); } catch (e) { /* 메뉴의 「홈 화면에 추가」로 대신할 수 있습니다 */ }
+  });
+  if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+
   /* ---------- 브라우저 확인과 소리 시험 ---------- */
   function showCompat() {
     let msg = '';
@@ -1233,7 +1571,7 @@ a { color: var(--go); }
     else if (/Safari\//.test(UA)) browser = 'Safari';
     const mic = { granted: '허용', denied: '차단', prompt: '매번 묻기', unknown: '확인 불가' }[st] || st;
     el.diag.textContent = [
-      '버전: 5',
+      '버전: 10',
       '브라우저: ' + browser,
       '말 알아듣기: ' + (Rec ? '지원' : '미지원'),
       '소리 답변: ' + (canSpeak ? '지원' : '미지원'),
@@ -1276,9 +1614,11 @@ a { color: var(--go); }
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el.sheet.hidden) closeSheet(); });
   el.clearChat.addEventListener('click', () => {
-    S.history = [];
+    wipeMemory();
+    window.clearTimeout(S.screenTimer);
     el.heard.textContent = '';
     el.answer.textContent = '';
+    el.check.textContent = '';
     closeSheet();
     setStatus('대화 내용을 지웠습니다.');
   });
