@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0E1512">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>라이브 묻기</title>
+<link href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* layout: a call screen. camera fills the stage, one big button and a row of small ones sit at the bottom edge */
+  --bg: #0E1512;
+  --panel: #17211D;
+  --ink: #E6EEE9;
+  --muted: #9DB0A7;
+  --line: #2C3A34;
+  --go: #35C48A;
+  --go-ink: #06140E;
+  --stop: #E0703A;
+  --warn: #F2B36B;
+  --font-display: "Do Hyeon", "Noto Sans KR", system-ui, sans-serif;
+  --font-body: "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 18px;
+  line-height: 1.55;
+  word-break: keep-all;
+  -webkit-text-size-adjust: 100%;
+}
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
+  outline: 3px solid var(--go);
+  outline-offset: 3px;
+}
+h1, h2 { font-family: var(--font-display); font-weight: 400; margin: 0; text-wrap: balance; }
+
+/* ----- 처음 설정 ----- */
+.setup {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 28px 18px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.setup h1 { font-size: 40px; line-height: 1.1; }
+.setup p { margin: 0; }
+.muted { color: var(--muted); font-size: 16px; }
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field label { font-weight: 700; }
+.field input, .field select {
+  min-height: 56px;
+  padding: 12px 14px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.big {
+  min-height: 60px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--go);
+  color: var(--go-ink);
+  font-weight: 700;
+  font-size: 20px;
+}
+.plain {
+  min-height: 48px;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: transparent;
+}
+.caution {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #2C2216;
+  color: var(--warn);
+  font-size: 16px;
+  font-weight: 500;
+}
+.steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 16px; }
+.error { color: var(--warn); font-weight: 500; }
+a { color: var(--go); }
+
+/* ----- 라이브 화면 ----- */
+.live { height: 100%; display: flex; flex-direction: column; }
+.stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #000;
+  overflow: hidden;
+}
+.stage video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.stage-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 28px;
+  text-align: center;
+  color: var(--muted);
+  background: var(--panel);
+}
+.pill {
+  position: absolute; top: 12px; left: 12px;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(14, 21, 18, .82);
+  font-weight: 700;
+}
+.pill::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); }
+.pill.listening::before { background: var(--go); }
+.pill.thinking::before { background: var(--warn); }
+.pill.speaking::before { background: var(--stop); }
+@media (prefers-reduced-motion: no-preference) {
+  .pill.listening::before, .pill.thinking::before { animation: beat 1.2s ease-in-out infinite; }
+  @keyframes beat { 50% { transform: scale(1.5); opacity: .55; } }
+}
+.captions {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 6px;
+  background: linear-gradient(to top, rgba(14, 21, 18, .92), rgba(14, 21, 18, 0));
+  max-height: 60%;
+  overflow-y: auto;
+}
+.captions p { margin: 0; overflow-wrap: anywhere; }
+.heard { color: var(--muted); font-size: 17px; }
+.heard:empty, .answer:empty { display: none; }
+.answer { font-size: 21px; line-height: 1.6; white-space: pre-wrap; }
+.status { margin: 0; padding: 8px 16px 0; color: var(--warn); font-size: 16px; }
+.status:empty { display: none; }
+.typed { display: flex; gap: 8px; padding: 10px 16px 0; }
+.typed input {
+  flex: 1 1 auto; min-width: 0; min-height: 54px;
+  padding: 10px 14px;
+  border: 2px solid var(--line); border-radius: 12px;
+  background: var(--panel);
+}
+.typed button { flex: none; min-height: 54px; padding: 0 18px; border: 0; border-radius: 12px; background: var(--go); color: var(--go-ink); font-weight: 700; }
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+  gap: 8px;
+  padding: 12px 16px 16px;
+}
+.main {
+  grid-column: 1 / -1;
+  min-height: 68px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--go);
+  color: var(--go-ink);
+  font: 400 26px/1.1 var(--font-display);
+}
+.main.end { background: var(--stop); color: #1B0A02; }
+.main.cut { background: var(--warn); color: #1F1503; }
+.ctl {
+  min-height: 52px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  font-size: 16px;
+  font-weight: 500;
+}
+.ctl[aria-pressed="true"] { border-color: var(--go); color: var(--go); }
+
+/* ----- 설정 창 ----- */
+.sheet {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, .6);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.sheet-box {
+  width: 100%; max-width: 520px; max-height: 92%;
+  overflow-y: auto;
+  padding: 20px 18px 24px;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  border-radius: 18px 18px 0 0;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.sheet-box h2 { font-size: 28px; }
+.rowbtn { display: flex; flex-wrap: wrap; gap: 8px; }
+</style>
+</head>
+<body>
+
+<section class="setup" id="setup" hidden>
+  <h1>라이브 묻기</h1>
+  <p>카메라로 비추면서 말로 물으면, Claude가 화면을 보고 소리로 답합니다.</p>
+  <div class="field">
+    <label for="key">Claude API 키</label>
+    <input id="key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-ant-로 시작하는 키">
+    <p class="muted">키는 이 기기의 이 브라우저에만 저장되고, 질문할 때 Anthropic 서버(api.anthropic.com)로만 보냅니다.</p>
+  </div>
+  <p class="error" id="setup-error" role="alert" hidden></p>
+  <button class="big" type="button" id="save-key">저장하고 시작 화면으로</button>
+  <ol class="steps">
+    <li>Claude Console(<a href="https://platform.claude.com/">platform.claude.com</a>)에서 API 키를 만듭니다.</li>
+    <li>Console에서 월 사용 한도를 낮게 걸어 두면 요금이 그 이상 나가지 않습니다.</li>
+    <li>키를 위 칸에 붙여 넣고 저장합니다. 다른 사람에게 키를 보여 주지 마세요.</li>
+  </ol>
+  <p class="caution">주민등록번호, 계좌번호, 카드번호, 비밀번호는 비추거나 말하지 마세요. 주변 사람 얼굴이 찍히지 않게 방향도 살펴 주세요.</p>
+  <p class="muted">말을 알아듣는 일은 브라우저의 음성 인식이 맡습니다. Chrome에서는 목소리가 Google 음성 인식으로 전달됩니다.</p>
+</section>
+
+<main class="live" id="live" hidden>
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="stage-empty" id="stage-empty">아래 시작 버튼을 누르면 카메라가 켜지고 듣기 시작합니다.</div>
+    <div class="pill" id="pill">쉬는 중</div>
+    <div class="captions">
+      <p class="heard" id="heard"></p>
+      <p class="answer" id="answer" hidden></p>
+    </div>
+  </div>
+  <p class="status" id="status" role="status"></p>
+  <form class="typed" id="typed" hidden>
+    <input id="typed-q" type="text" autocomplete="off" placeholder="여기에 물어볼 말을 넣으세요" aria-label="물어볼 말">
+    <button type="submit">보내기</button>
+  </form>
+  <div class="controls">
+    <button class="main" type="button" id="btn-main">시작</button>
+    <button class="ctl" type="button" id="btn-cam" aria-pressed="true">카메라</button>
+    <button class="ctl" type="button" id="btn-flip">앞뒤 전환</button>
+    <button class="ctl" type="button" id="btn-screen" aria-pressed="false" hidden>화면 공유</button>
+    <button class="ctl" type="button" id="btn-text" aria-pressed="false">글로 보기</button>
+    <button class="ctl" type="button" id="btn-set">설정</button>
+  </div>
+</main>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-box" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <h2 id="sheet-title">설정</h2>
+    <div class="field">
+      <label for="model">답하는 모델</label>
+      <input id="model" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="rowbtn">
+        <button class="plain" type="button" data-model="claude-haiku-5-5">빠르게 (Haiku)</button>
+        <button class="plain" type="button" data-model="claude-sonnet-5-5">꼼꼼하게 (Sonnet)</button>
+      </div>
+      <p class="muted">빠른 모델이 값도 훨씬 쌉니다. 모델 이름을 찾지 못한다는 안내가 나오면 여기서 고칩니다.</p>
+    </div>
+    <div class="field">
+      <label for="rate">말하는 속도</label>
+      <select id="rate">
+        <option value="0.8">천천히</option>
+        <option value="1" selected>보통</option>
+        <option value="1.2">빠르게</option>
+      </select>
+    </div>
+    <div class="rowbtn">
+      <button class="plain" type="button" id="clear-chat">대화 내용 지우기</button>
+      <button class="plain" type="button" id="change-key">API 키 바꾸기</button>
+      <button class="plain" type="button" id="delete-key">API 키 지우기</button>
+    </div>
+    <button class="big" type="button" id="close-sheet">닫기</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const el = {
+    setup: $('setup'), key: $('key'), saveKey: $('save-key'), setupError: $('setup-error'),
+    live: $('live'), video: $('video'), stageEmpty: $('stage-empty'), pill: $('pill'),
+    heard: $('heard'), answer: $('answer'), status: $('status'),
+    typed: $('typed'), typedQ: $('typed-q'),
+    main: $('btn-main'), cam: $('btn-cam'), flip: $('btn-flip'), screen: $('btn-screen'), text: $('btn-text'), set: $('btn-set'),
+    sheet: $('sheet'), model: $('model'), rate: $('rate'),
+    clearChat: $('clear-chat'), changeKey: $('change-key'), deleteKey: $('delete-key'), closeSheet: $('close-sheet'),
+  };
+
+  const API = 'https://api.anthropic.com/v1/messages';
+  const DEFAULT_MODEL = 'claude-haiku-5-5';
+  const Rec = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  const canSpeak = 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function';
+  const canShareScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+
+  const store = {
+    get(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { window.localStorage.setItem(k, v); } catch (e) { /* 저장이 안 되면 이번에만 씁니다 */ } },
+    del(k) { try { window.localStorage.removeItem(k); } catch (e) { /* 지울 것이 없음 */ } },
+  };
+
+  const S = {
+    key: store.get('live-ask-key') || '',
+    model: store.get('live-ask-model') || DEFAULT_MODEL,
+    rate: Number(store.get('live-ask-rate')) || 1,
+    showText: store.get('live-ask-text') === 'on',
+    camOn: true, facing: 'environment',
+    live: false, phase: 'idle', run: 0,
+    cam: null, shared: null,
+    rec: null, recActive: false, noMic: !Rec, failCount: 0,
+    history: [], ctl: null,
+    speakPending: 0, streamDone: true, watchdog: 0,
+    wake: null,
+  };
+  const dead = new WeakSet();
+  let koVoice = null;
+  let liveUtterances = [];
+
+  const RULES = [
+    '당신은 휴대폰 카메라로 비추면서 말로 묻는 사람과 실시간으로 대화하는 도우미입니다. 이 사람은 스마트폰에 익숙하지 않을 수 있습니다.',
+    '한국어 존댓말로, 쉬운 낱말로, 한두 문장에서 세 문장 사이로 짧게 답합니다. 더 알고 싶어 하면 그때 이어서 설명합니다.',
+    '답은 소리로 읽히므로 기호, 목록, 굵은 글씨, 이모지를 쓰지 않고 이어지는 문장으로만 씁니다.',
+    '사용자의 말은 음성 인식을 거쳐 오므로 낱말이 조금 틀릴 수 있습니다. 뜻을 헤아려 답하고, 정말 모르겠으면 다시 말해 달라고 합니다.',
+    '사진이 함께 오면 그것이 사용자가 말을 마친 순간의 카메라 화면입니다. 실제로 보이는 것만 근거로 답하고, 흐리거나 잘려서 안 보이면 그렇게 말하고 더 가까이 비춰 달라고 합니다. 사진이 없으면 카메라가 꺼져 있는 것입니다.',
+    '약, 치료, 투자, 세금, 계약에 관한 내용은 이해를 돕는 설명만 하고, 결정은 약사나 의사, 해당 전문가에게 확인하라고 한 문장으로 덧붙입니다.',
+    '사기가 의심되는 문자나 화면이면 링크를 누르지 말고 해당 기관 대표번호로 직접 확인하라고 말합니다.',
+    '화면에 주민등록번호, 계좌번호, 카드번호, 비밀번호가 보여도 그 숫자는 읽어 주지 않고, 가리고 비추라고 알려 줍니다.',
+  ].join('\n');
+
+  /* ---------- 화면 전환 ---------- */
+  function showSetup(msg) {
+    stopLive();
+    el.live.hidden = true;
+    el.sheet.hidden = true;
+    el.setup.hidden = false;
+    el.key.value = '';
+    el.setupError.hidden = !msg;
+    el.setupError.textContent = msg || '';
+  }
+  function showLive() {
+    el.setup.hidden = true;
+    el.live.hidden = false;
+    reflectAll();
+  }
+  function setStatus(msg) { el.status.textContent = msg || ''; }
+
+  const PHASE = {
+    idle: ['쉬는 중', '시작', ''],
+    listening: ['듣는 중', '끝내기', 'end'],
+    thinking: ['생각하는 중', '말 끊기', 'cut'],
+    speaking: ['답하는 중', '말 끊기', 'cut'],
+  };
+  function setPhase(p) {
+    S.phase = p;
+    const [pill, label, cls] = PHASE[p];
+    el.pill.textContent = S.noMic && p === 'listening' ? '글로 물어보세요' : pill;
+    el.pill.className = 'pill ' + p;
+    el.main.textContent = label;
+    el.main.className = 'main' + (cls ? ' ' + cls : '');
+    el.typed.hidden = !(S.live && S.noMic);
+  }
+  function reflectAll() {
+    el.cam.setAttribute('aria-pressed', String(S.camOn));
+    el.text.setAttribute('aria-pressed', String(S.showText || !canSpeak));
+    el.answer.hidden = !(S.showText || !canSpeak);
+    el.screen.hidden = !canShareScreen;
+    el.screen.setAttribute('aria-pressed', String(!!S.shared));
+    el.flip.disabled = !S.camOn || !!S.shared;
+    setPhase(S.phase);
+  }
+
+  /* ---------- 카메라와 화면 공유 ---------- */
+  function stopStream(stream) {
+    if (!stream) return;
+    for (const t of stream.getTracks()) { try { t.stop(); } catch (e) { /* 이미 멈춤 */ } }
+  }
+  function showSource() {
+    const src = S.shared || S.cam;
+    el.video.srcObject = src || null;
+    el.stageEmpty.hidden = !!src;
+    if (!src) {
+      el.stageEmpty.textContent = S.live
+        ? '카메라가 꺼져 있습니다. 말로만 대화합니다.'
+        : '아래 시작 버튼을 누르면 카메라가 켜지고 듣기 시작합니다.';
+    } else {
+      const p = el.video.play();
+      if (p && p.catch) p.catch(() => {});
+    }
+  }
+  async function openCamera() {
+    stopStream(S.cam);
+    S.cam = null;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      S.camOn = false;
+      setStatus('이 주소에서는 카메라를 켤 수 없습니다. https 주소로 열어야 합니다. 말로만 대화합니다.');
+      showSource();
+      reflectAll();
+      return;
+    }
+    try {
+      S.cam = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: S.facing }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      if (!S.live || !S.camOn) { stopStream(S.cam); S.cam = null; }
+    } catch (e) {
+      S.camOn = false;
+      setStatus(e && e.name === 'NotAllowedError'
+        ? '카메라 사용이 허용되지 않았습니다. 말로만 대화합니다.'
+        : '카메라를 켜지 못했습니다. 말로만 대화합니다.');
+    }
+    showSource();
+    reflectAll();
+  }
+  async function toggleScreen() {
+    if (S.shared) { stopStream(S.shared); S.shared = null; showSource(); reflectAll(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      S.shared = stream;
+      const track = stream.getVideoTracks()[0];
+      if (track) track.addEventListener('ended', () => { if (S.shared === stream) { S.shared = null; showSource(); reflectAll(); } });
+      setStatus('화면을 함께 보고 있습니다. 알림에 뜨는 내용도 보일 수 있으니 끝나면 공유를 꺼 주세요.');
+    } catch (e) {
+      setStatus('화면 공유를 시작하지 못했습니다.');
+    }
+    showSource();
+    reflectAll();
+  }
+  function grabFrame() {
+    const v = el.video;
+    if (!v.srcObject || !v.videoWidth || !v.videoHeight) return null;
+    try {
+      const k = Math.min(1, 1024 / Math.max(v.videoWidth, v.videoHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(v.videoWidth * k));
+      c.height = Math.max(1, Math.round(v.videoHeight * k));
+      c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+      const url = c.toDataURL('image/jpeg', 0.8);
+      const i = url.indexOf(',');
+      return i > 0 ? url.slice(i + 1) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /* ---------- 듣기 ---------- */
+  function stopListening() {
+    const r = S.rec;
+    if (!r) return;
+    dead.add(r);
+    try { r.abort(); } catch (e) { /* 이미 끝남 */ }
+  }
+  function micBlocked(msg) {
+    S.noMic = true;
+    setStatus(msg);
+    setPhase('listening');
+  }
+  function listen() {
+    if (!S.live) return;
+    setPhase('listening');
+    if (S.noMic) return;
+    if (S.recActive) { window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(); }, 250); return; }
+    const r = new Rec();
+    r.lang = 'ko-KR';
+    r.interimResults = true;
+    r.continuous = false;
+    r.maxAlternatives = 1;
+    let finalText = '';
+    let errCode = '';
+    const startedAt = Date.now();
+    r.onresult = (ev) => {
+      let interim = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
+        const t = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) finalText += t; else interim += t;
+      }
+      if (!dead.has(r)) el.heard.textContent = (finalText + interim).trim();
+    };
+    r.onerror = (ev) => { errCode = ev.error || 'error'; };
+    r.onend = () => {
+      S.recActive = false;
+      if (S.rec === r) S.rec = null;
+      if (dead.has(r) || !S.live || S.phase !== 'listening') return;
+      const text = finalText.trim();
+      if (text) { S.failCount = 0; ask(text); return; }
+      if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
+        micBlocked('마이크 사용이 허용되지 않았습니다. 아래 칸에 글로 물어보세요.');
+        return;
+      }
+      if (errCode === 'network') {
+        micBlocked('음성 인식에 연결하지 못했습니다. 아래 칸에 글로 물어보세요.');
+        return;
+      }
+      S.failCount = Date.now() - startedAt < 800 ? S.failCount + 1 : 0;
+      if (S.failCount >= 4) {
+        micBlocked('이 브라우저에서는 말을 알아듣지 못합니다. 아래 칸에 글로 물어보세요.');
+        return;
+      }
+      window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(); }, 350);
+    };
+    try {
+      r.start();
+      S.rec = r;
+      S.recActive = true;
+    } catch (e) {
+      S.failCount += 1;
+      if (S.failCount >= 4) micBlocked('이 브라우저에서는 말을 알아듣지 못합니다. 아래 칸에 글로 물어보세요.');
+      else window.setTimeout(() => { if (S.live && S.phase === 'listening') listen(); }, 600);
+    }
+  }
+
+  /* ---------- 말하기 ---------- */
+  function pickVoice() {
+    try {
+      const voices = window.speechSynthesis.getVoices() || [];
+      koVoice = voices.find((v) => /^ko([-_]|$)/i.test(v.lang || '')) || null;
+    } catch (e) { koVoice = null; }
+  }
+  if (canSpeak) {
+    pickVoice();
+    try { window.speechSynthesis.onvoiceschanged = pickVoice; } catch (e) { /* 말할 때 다시 찾습니다 */ }
+  }
+  function primeSpeech() {
+    if (!canSpeak) return;
+    try {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      window.speechSynthesis.speak(u);
+    } catch (e) { /* 소리 없이 글로 보여 줍니다 */ }
+  }
+  function hush() {
+    if (canSpeak) { try { window.speechSynthesis.cancel(); } catch (e) { /* 이미 조용함 */ } }
+    liveUtterances = [];
+    S.speakPending = 0;
+    window.clearTimeout(S.watchdog);
+  }
+  function say(text, run) {
+    if (!canSpeak || !text) return;
+    if (!koVoice) pickVoice();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ko-KR';
+    if (koVoice) u.voice = koVoice;
+    u.rate = S.rate;
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      if (run !== S.run) return;
+      S.speakPending -= 1;
+      maybeResume(run);
+    };
+    u.onend = done;
+    u.onerror = done;
+    S.speakPending += 1;
+    liveUtterances.push(u);
+    try { window.speechSynthesis.speak(u); } catch (e) { done(); }
+  }
+  /* 문장이 끝날 때마다 바로 읽어서, 답이 다 오기 전에 말이 시작되게 합니다. */
+  function speakReady(buf, run, final) {
+    const re = /[.!?…]+["')\]]*\s+|\n+/g;
+    let last = 0;
+    while (re.exec(buf) !== null) {
+      const s = buf.slice(last, re.lastIndex).trim();
+      last = re.lastIndex;
+      if (s) say(s, run);
+    }
+    let rest = buf.slice(last);
+    if (final) {
+      if (rest.trim()) say(rest.trim(), run);
+      rest = '';
+    }
+    return rest;
+  }
+  function maybeResume(run) {
+    if (run !== S.run || !S.live) return;
+    if (S.streamDone && S.speakPending <= 0) {
+      window.clearTimeout(S.watchdog);
+      liveUtterances = [];
+      listen();
+    }
+  }
+
+  /* ---------- Claude에게 묻기 ---------- */
+  async function apiError(resp) {
+    let j = null;
+    try { j = await resp.json(); } catch (e) { j = null; }
+    const msg = (j && j.error && j.error.message) || '';
+    const err = new Error(msg || ('HTTP ' + resp.status));
+    if (resp.status === 401) { err.userMessage = 'API 키가 맞지 않습니다. 키를 다시 넣어 주세요.'; err.needKey = true; }
+    else if (resp.status === 403) { err.userMessage = '이 키로는 사용할 수 없습니다. Console에서 키 권한을 확인해 주세요.'; err.fatal = true; }
+    else if (resp.status === 404) { err.userMessage = '모델 이름을 찾지 못했습니다. 설정에서 답하는 모델을 확인해 주세요.'; err.fatal = true; }
+    else if (resp.status === 429) { err.userMessage = '요청이 많아 잠시 쉬어야 합니다. 조금 뒤에 다시 물어보세요.'; }
+    else if (resp.status === 400 && /credit/i.test(msg)) { err.userMessage = 'API 크레딧이 부족합니다. Console에서 충전한 뒤 다시 시작해 주세요.'; err.fatal = true; }
+    else if (resp.status === 400) { err.userMessage = '요청이 거절되었습니다. ' + msg.slice(0, 140); }
+    else if (resp.status >= 500) { err.userMessage = 'Claude 서버가 바쁩니다. 조금 뒤에 다시 물어보세요.'; }
+    return err;
+  }
+  async function readStream(resp, onDelta) {
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+      let cut = buf.indexOf('\n\n');
+      while (cut >= 0) {
+        const block = buf.slice(0, cut);
+        buf = buf.slice(cut + 2);
+        for (const line of block.split('\n')) {
+          if (line.indexOf('data:') !== 0) continue;
+          let j = null;
+          try { j = JSON.parse(line.slice(5).trim()); } catch (e) { j = null; }
+          if (!j) continue;
+          if (j.type === 'content_block_delta' && j.delta && j.delta.type === 'text_delta' && j.delta.text) onDelta(j.delta.text);
+          else if (j.type === 'error') {
+            const err = new Error((j.error && j.error.message) || 'stream error');
+            err.userMessage = '답이 중간에 끊겼습니다. 다시 물어보세요.';
+            throw err;
+          }
+        }
+        cut = buf.indexOf('\n\n');
+      }
+    }
+  }
+
+  async function ask(rawText) {
+    const text = String(rawText || '').trim();
+    if (!text || !S.live) return;
+    stopListening();
+    hush();
+    const run = ++S.run;
+    setPhase('thinking');
+    setStatus('');
+    el.heard.textContent = text;
+    el.answer.textContent = '';
+    const frame = grabFrame();
+    const content = frame
+      ? [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frame } }, { type: 'text', text }]
+      : text;
+    const messages = S.history.slice(-10).concat([{ role: 'user', content }]);
+    const ctl = new AbortController();
+    S.ctl = ctl;
+    S.streamDone = false;
+    let full = '';
+    let buf = '';
+    try {
+      const resp = await fetch(API, {
+        method: 'POST',
+        signal: ctl.signal,
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': S.key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({ model: S.model, max_tokens: 500, system: RULES, stream: true, messages }),
+      });
+      if (!resp.ok) throw await apiError(resp);
+      await readStream(resp, (delta) => {
+        if (run !== S.run) return;
+        full += delta;
+        el.answer.textContent = full;
+        if (S.phase === 'thinking') setPhase('speaking');
+        buf = speakReady(buf + delta, run, false);
+      });
+      if (run !== S.run) return;
+      speakReady(buf, run, true);
+      if (full.trim()) {
+        S.history.push({ role: 'user', content: (frame ? '[카메라 화면을 함께 보냄] ' : '') + text });
+        S.history.push({ role: 'assistant', content: full });
+      } else {
+        setStatus('답을 받지 못했습니다. 다시 물어보세요.');
+      }
+      S.streamDone = true;
+      // 읽기가 끝났다는 신호가 안 오는 브라우저가 있어, 시간이 지나면 다시 듣기로 넘어갑니다.
+      window.clearTimeout(S.watchdog);
+      S.watchdog = window.setTimeout(() => {
+        if (run !== S.run) return;
+        S.speakPending = 0;
+        maybeResume(run);
+      }, 8000 + full.length * 320);
+      maybeResume(run);
+    } catch (e) {
+      if (run !== S.run) return;
+      S.streamDone = true;
+      if (e && e.name === 'AbortError') return;
+      const msg = (e && e.userMessage) || '연결이 끊겼습니다. 인터넷을 확인하고 다시 물어보세요.';
+      if (e && e.needKey) { showSetup(msg); return; }
+      if (e && e.fatal) { stopLive(); setStatus(msg); return; }
+      setStatus(msg);
+      maybeResume(run);
+    } finally {
+      if (S.ctl === ctl) S.ctl = null;
+    }
+  }
+
+  /* ---------- 시작과 끝 ---------- */
+  async function requestWake() {
+    try {
+      if (navigator.wakeLock && navigator.wakeLock.request) S.wake = await navigator.wakeLock.request('screen');
+    } catch (e) { S.wake = null; }
+  }
+  async function startLive() {
+    if (S.live) return;
+    S.live = true;
+    S.failCount = 0;
+    S.noMic = !Rec;
+    setStatus(Rec ? '' : '이 브라우저는 말을 알아듣지 못합니다. 아래 칸에 글로 물어보세요.');
+    primeSpeech();
+    setPhase('listening');
+    if (S.camOn) await openCamera(); else showSource();
+    if (!S.live) return;
+    requestWake();
+    listen();
+  }
+  function stopLive() {
+    const was = S.live;
+    S.live = false;
+    S.run += 1;
+    if (S.ctl) { try { S.ctl.abort(); } catch (e) { /* 이미 끝남 */ } }
+    hush();
+    stopListening();
+    stopStream(S.cam); S.cam = null;
+    stopStream(S.shared); S.shared = null;
+    if (S.wake) { try { S.wake.release(); } catch (e) { /* 이미 풀림 */ } S.wake = null; }
+    showSource();
+    el.heard.textContent = '';
+    if (was) el.answer.textContent = '';
+    S.phase = 'idle';
+    reflectAll();
+  }
+  function interrupt() {
+    S.run += 1;
+    if (S.ctl) { try { S.ctl.abort(); } catch (e) { /* 이미 끝남 */ } }
+    hush();
+    S.streamDone = true;
+    listen();
+  }
+
+  /* ---------- 버튼 ---------- */
+  el.main.addEventListener('click', () => {
+    if (!S.live) { startLive(); return; }
+    if (S.phase === 'listening') { stopLive(); setStatus(''); return; }
+    primeSpeech();
+    interrupt();
+  });
+  el.cam.addEventListener('click', () => {
+    S.camOn = !S.camOn;
+    if (S.live) {
+      if (S.camOn) openCamera();
+      else { stopStream(S.cam); S.cam = null; showSource(); }
+    }
+    reflectAll();
+  });
+  el.flip.addEventListener('click', () => {
+    S.facing = S.facing === 'environment' ? 'user' : 'environment';
+    if (S.live && S.camOn) openCamera();
+  });
+  el.screen.addEventListener('click', () => { if (S.live) toggleScreen(); else setStatus('먼저 시작을 눌러 주세요.'); });
+  el.text.addEventListener('click', () => {
+    S.showText = !S.showText;
+    store.set('live-ask-text', S.showText ? 'on' : 'off');
+    reflectAll();
+  });
+  el.typed.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const t = el.typedQ.value.trim();
+    if (!t || !S.live) return;
+    el.typedQ.value = '';
+    primeSpeech();
+    ask(t);
+  });
+
+  el.set.addEventListener('click', () => {
+    el.model.value = S.model;
+    el.rate.value = String(S.rate);
+    el.sheet.hidden = false;
+    el.closeSheet.focus();
+  });
+  function closeSheet() {
+    const m = el.model.value.trim() || DEFAULT_MODEL;
+    S.model = m;
+    store.set('live-ask-model', m);
+    S.rate = Number(el.rate.value) || 1;
+    store.set('live-ask-rate', String(S.rate));
+    el.sheet.hidden = true;
+    el.set.focus();
+  }
+  el.closeSheet.addEventListener('click', closeSheet);
+  el.sheet.addEventListener('click', (e) => {
+    if (e.target === el.sheet) closeSheet();
+    const b = e.target.closest('[data-model]');
+    if (b) el.model.value = b.getAttribute('data-model');
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el.sheet.hidden) closeSheet(); });
+  el.clearChat.addEventListener('click', () => {
+    S.history = [];
+    el.heard.textContent = '';
+    el.answer.textContent = '';
+    closeSheet();
+    setStatus('대화 내용을 지웠습니다.');
+  });
+  el.changeKey.addEventListener('click', () => { closeSheet(); showSetup(''); });
+  el.deleteKey.addEventListener('click', () => {
+    S.key = '';
+    store.del('live-ask-key');
+    closeSheet();
+    showSetup('저장된 API 키를 지웠습니다.');
+  });
+
+  el.saveKey.addEventListener('click', () => {
+    const k = el.key.value.trim();
+    if (!k) {
+      if (S.key) { showLive(); return; }
+      el.setupError.hidden = false;
+      el.setupError.textContent = 'API 키를 넣어 주세요.';
+      return;
+    }
+    S.key = k;
+    store.set('live-ask-key', k);
+    el.key.value = '';
+    showLive();
+  });
+  el.key.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.saveKey.click(); });
+
+  // 화면을 벗어나면 카메라와 마이크를 끕니다.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && S.live) {
+      stopLive();
+      setStatus('화면을 벗어나 대화를 끝냈습니다. 다시 하려면 시작을 눌러 주세요.');
+    }
+  });
+
+  if (S.key) showLive(); else showSetup('');
+})();
+</script>
+</body>
+</html>
