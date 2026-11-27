@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-e6MCRufGGjk58CoqWJ+mMkyrsb8HMyzSgXVNqfQPLN4='; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src https://api.anthropic.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-d0Zvl1P8/74vHZTFYqfp77X6ojqobnB6nVGrE4h4J94='; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src https://api.anthropic.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0E1512">
@@ -264,6 +264,7 @@ a { color: var(--go); }
     <button class="ctl" type="button" id="btn-flip">앞뒤 전환</button>
     <button class="ctl" type="button" id="btn-torch" aria-pressed="false" hidden>조명</button>
     <button class="ctl" type="button" id="btn-screen" aria-pressed="false" hidden>화면 공유</button>
+    <button class="ctl" type="button" id="btn-scan" aria-pressed="false">실시간 번역</button>
     <button class="ctl" type="button" id="btn-interp" aria-pressed="false">통역</button>
     <button class="ctl" type="button" id="btn-auto" aria-pressed="true">계속 듣기</button>
     <button class="ctl" type="button" id="btn-text" aria-pressed="false">글로 보기</button>
@@ -363,7 +364,7 @@ a { color: var(--go); }
     sheet: $('sheet'), model: $('model'), rate: $('rate'),
     clearChat: $('clear-chat'), changeKey: $('change-key'), deleteKey: $('delete-key'), closeSheet: $('close-sheet'),
     compat: $('compat'), compatText: $('compat-text'), openChrome: $('open-chrome'),
-    pause: $('pause'), install: $('btn-install'), usageNote: $('usage-note'), recheck: $('recheck'), memory: $('memory'), budget: $('budget'), resetDay: $('reset-day'), usageDetail: $('usage-detail'), torch: $('btn-torch'), main2: $('btn-main2'), interp: $('btn-interp'), myLang: $('my-lang'), otherLang: $('other-lang'), auto: $('btn-auto'), end: $('btn-end'), testSound: $('test-sound'), testResult: $('test-result'), diag: $('diag'),
+    pause: $('pause'), scan: $('btn-scan'), stage: $('stage'), install: $('btn-install'), usageNote: $('usage-note'), recheck: $('recheck'), memory: $('memory'), budget: $('budget'), resetDay: $('reset-day'), usageDetail: $('usage-detail'), torch: $('btn-torch'), main2: $('btn-main2'), interp: $('btn-interp'), myLang: $('my-lang'), otherLang: $('other-lang'), auto: $('btn-auto'), end: $('btn-end'), testSound: $('test-sound'), testResult: $('test-result'), diag: $('diag'),
   };
 
   const API = 'https://api.anthropic.com/v1/messages';
@@ -407,7 +408,7 @@ a { color: var(--go); }
     memory: ['none', 'short', 'session'].indexOf(store.get('live-ask-memory')) >= 0 ? store.get('live-ask-memory') : 'none',
     budget: Number(store.get('live-ask-budget')) || 100,
     resetDay: Math.min(31, Math.max(1, Math.round(Number(store.get('live-ask-reset')) || 15))),
-    memTimer: 0, screenTimer: 0, sheetPaused: false, torchOn: false, canTorch: false,
+    memTimer: 0, screenTimer: 0, sheetPaused: false, scan: false, scanWanted: false, torchOn: false, canTorch: false,
     camOn: true, facing: 'environment',
     live: false, phase: 'idle', run: 0,
     cam: null, shared: null,
@@ -525,6 +526,7 @@ a { color: var(--go); }
     listening: ['듣는 중', '다 말했어요', ''],
     thinking: ['생각하는 중', '말 끊기', 'cut'],
     speaking: ['답하는 중', '말 끊기', 'cut'],
+    scan: ['실시간 번역 중', '번역 멈추기', 'end'],
   };
   function setPhase(p) {
     S.phase = p;
@@ -542,7 +544,7 @@ a { color: var(--go); }
     el.main.className = 'main' + (typedOnly ? ' end' : (cls ? ' ' + cls : ''));
     el.main2.hidden = !pick;
     el.main2.textContent = '상대가 말하기 (' + langNative(S.otherLang) + ')';
-    el.typed.hidden = !(S.live && S.noMic);
+    el.typed.hidden = !(S.live && S.noMic && !S.scan);
     el.end.hidden = !S.live;
   }
   function reflectAll() {
@@ -552,7 +554,8 @@ a { color: var(--go); }
     el.answer.hidden = !textOn;
     el.check.hidden = !textOn;
     el.auto.setAttribute('aria-pressed', String(S.auto && !S.manualForced));
-    el.auto.hidden = S.noMic || S.interp;
+    el.auto.hidden = S.noMic || S.interp || S.scan;
+    el.scan.setAttribute('aria-pressed', String(S.scan));
     el.interp.setAttribute('aria-pressed', String(S.interp));
     el.screen.hidden = !canShareScreen;
     el.screen.setAttribute('aria-pressed', String(!!S.shared));
@@ -755,7 +758,7 @@ a { color: var(--go); }
   }
   /* fromTap: 사용자가 버튼을 눌러 시작한 듣기. 누를 때만 듣기 방식에서는 이때만 마이크를 켭니다. */
   function listen(fromTap) {
-    if (!S.live) return;
+    if (!S.live || S.scan) return;
     if (S.noMic) { setPhase('listening'); return; }
     if (isManual() && !fromTap) { setPhase('ready'); return; }
     setPhase('listening');
@@ -938,7 +941,7 @@ a { color: var(--go); }
     return rest;
   }
   function maybeResume(run) {
-    if (run !== S.run || !S.live) return;
+    if (run !== S.run || !S.live || S.scan) return;
     if (S.streamDone && S.speakPending <= 0) {
       window.clearTimeout(S.watchdog);
       liveUtterances = [];
@@ -1231,6 +1234,180 @@ a { color: var(--go); }
     }
   }
 
+  /* ---------- 실시간 번역 ---------- */
+  /* 버튼을 누르면 카메라에 보이는 외국어 글자를 내 언어로 옮겨 보여 주고 읽어 줍니다.
+     화면이 바뀐 뒤 잠깐 멈췄을 때만 보내서, 같은 장면을 되풀이해 보내지 않습니다. */
+  const SCAN_LIMIT_MS = 3 * 60 * 1000;
+  let scanTimer = 0;
+  let scanBusy = false;
+  let scanCtl = null;
+  let scanPrev = null;
+  let scanSent = null;
+  let scanSentAt = 0;
+  let scanStartedAt = 0;
+  let scanForce = false;
+  function scanRules() {
+    const mine = langKo(S.myLang);
+    return [
+      '당신은 카메라에 비친 글자를 바로 옮겨 주는 번역기입니다.',
+      '사진에서 ' + mine + '가 아닌 언어로 적힌 글자를 찾아 ' + mine + '로 옮깁니다.',
+      '옮긴 내용만 씁니다. 원문, 설명, 인사말, 기호, 목록 표시는 쓰지 않습니다. 글이 여러 덩어리면 위에서 아래 순서로, 덩어리마다 줄을 바꿔 씁니다.',
+      '메뉴나 안내판처럼 항목이 많으면 눈에 띄는 것부터 옮기고, 가격과 숫자는 그대로 둡니다.',
+      '글자가 흐리거나 잘려 일부만 읽히면 읽히는 부분만 옮깁니다. 보이지 않는 내용을 지어내지 않습니다.',
+      '옮길 외국어 글자가 전혀 없으면 정확히 없음 이라고만 씁니다.',
+      '주민등록번호, 계좌번호, 카드번호, 비밀번호로 보이는 숫자는 옮기지 않습니다.',
+    ].join('\n');
+  }
+  function signature(v) {
+    const w = 48;
+    const h = 27;
+    probe.width = w;
+    probe.height = h;
+    const ctx = probe.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(v, 0, 0, w, h);
+    const d = ctx.getImageData(0, 0, w, h).data;
+    const g = new Uint8Array(w * h);
+    for (let i = 0, j = 0; i < d.length; i += 4, j += 1) g[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+    return g;
+  }
+  function sigDiff(a, b) {
+    if (!a || !b || a.length !== b.length) return 255;
+    let sum = 0;
+    for (let i = 0; i < a.length; i += 1) sum += Math.abs(a[i] - b[i]);
+    return sum / a.length;
+  }
+  async function scanTick() {
+    if (!S.live || !S.scan || scanBusy || !el.sheet.hidden) return;
+    if (Date.now() - scanStartedAt > SCAN_LIMIT_MS) {
+      stopScan('3분이 지나 실시간 번역을 멈췄습니다. 계속하려면 다시 눌러 주세요.');
+      return;
+    }
+    const v = el.video;
+    if (!v.srcObject || !v.videoWidth || !v.videoHeight) {
+      setStatus('카메라가 꺼져 있어 번역할 수 없습니다. 카메라 버튼을 눌러 켜 주세요.');
+      return;
+    }
+    let sig = null;
+    try { sig = signature(v); } catch (e) { return; }
+    const steady = sigDiff(sig, scanPrev) < 7;
+    scanPrev = sig;
+    const changed = !scanSent || sigDiff(sig, scanSent) > 12;
+    if (!scanForce && (!steady || !changed || Date.now() - scanSentAt < 2500)) return;
+    scanForce = false;
+    if (usageState().blocked) { stopLive(); reflectUsage(); return; }
+    const frame = grabFrame();
+    if (!frame) return;
+    scanBusy = true;
+    scanSent = sig;
+    scanSentAt = Date.now();
+    const myRun = S.run;
+    const ctl = new AbortController();
+    scanCtl = ctl;
+    el.pill.textContent = '번역하는 중';
+    let inTok = 0;
+    let outTok = 0;
+    try {
+      const resp = await fetch(API, {
+        method: 'POST',
+        signal: ctl.signal,
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': S.key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: S.model,
+          max_tokens: 700,
+          system: scanRules(),
+          messages: [{ role: 'user', content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frame } },
+            { type: 'text', text: '이 화면에 보이는 글을 옮겨 주세요.' },
+          ] }],
+        }),
+      });
+      if (!resp.ok) throw await apiError(resp);
+      const j = await resp.json();
+      if (j && j.usage) {
+        inTok = (j.usage.input_tokens || 0) + (j.usage.cache_creation_input_tokens || 0) + (j.usage.cache_read_input_tokens || 0);
+        outTok = j.usage.output_tokens || 0;
+      }
+      if (myRun !== S.run || !S.scan) return;
+      const parts = (j && Array.isArray(j.content)) ? j.content : [];
+      const text = parts.filter((c) => c && c.type === 'text').map((c) => c.text).join('').trim();
+      if (!text || /^없음[.。]?$/.test(text)) {
+        el.answer.textContent = '';
+        setStatus('외국어 글자를 찾고 있습니다. 글자가 화면에 크게 들어오게 비추고 잠깐 멈춰 주세요.');
+      } else if (text !== el.answer.textContent) {
+        setStatus('');
+        el.answer.textContent = text;
+        hush();
+        S.outLang = S.myLang;
+        speakReady(text, myRun, true);
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      if (myRun !== S.run) return;
+      const msg = (e && e.userMessage) || '연결이 끊겼습니다. 인터넷을 확인해 주세요.';
+      if (e && e.needKey) { showSetup(msg); return; }
+      if (e && e.credit) { store.set('live-ask-blocked', cycle(new Date()).key); stopLive(); setStatus(''); reflectUsage(); return; }
+      if (e && e.fatal) { stopLive(); setStatus(msg); return; }
+      setStatus(msg);
+      scanSent = null;
+    } finally {
+      scanBusy = false;
+      if (scanCtl === ctl) scanCtl = null;
+      if (inTok || outTok) addUsage(S.model, inTok, outTok);
+      if (S.scan && S.live) el.pill.textContent = '실시간 번역 중';
+    }
+  }
+  function beginScan() {
+    if (!S.live) return;
+    S.run += 1;
+    if (S.ctl) { try { S.ctl.abort(); } catch (e) { /* 이미 끝남 */ } }
+    hush();
+    stopListening();
+    resetHeard();
+    window.clearTimeout(S.screenTimer);
+    S.onceLang = '';
+    S.interp = false;
+    S.streamDone = true;
+    S.scan = true;
+    S.transView = true;
+    scanPrev = null;
+    scanSent = null;
+    scanSentAt = 0;
+    scanStartedAt = Date.now();
+    scanForce = false;
+    el.heard.textContent = '';
+    el.answer.textContent = '';
+    el.check.textContent = '';
+    if (!S.camOn && !S.shared) { S.camOn = true; openCamera(); }
+    setStatus('외국어 글자가 화면에 크게 들어오게 비추고 잠깐 멈춰 주세요. 화면을 누르면 바로 다시 번역합니다.');
+    setPhase('scan');
+    reflectAll();
+    window.clearInterval(scanTimer);
+    scanTimer = window.setInterval(scanTick, 900);
+  }
+  function endScanState() {
+    S.scan = false;
+    S.scanWanted = false;
+    window.clearInterval(scanTimer);
+    if (scanCtl) { try { scanCtl.abort(); } catch (e) { /* 이미 끝남 */ } }
+  }
+  function stopScan(msg) {
+    if (!S.scan) return;
+    endScanState();
+    S.transView = false;
+    S.run += 1;
+    hush();
+    el.answer.textContent = '';
+    el.check.textContent = '';
+    setStatus(msg || '');
+    reflectAll();
+    if (S.live) listen();
+  }
+
   /* ---------- 시작과 끝 ---------- */
   async function requestWake() {
     try {
@@ -1326,11 +1503,13 @@ a { color: var(--go); }
     sampler = window.setInterval(() => {
       if (S.live && S.phase === 'listening' && S.heardNow && !S.interp && !S.onceLang) sampleFrame();
     }, 450);
-    listen();
+    if (S.scanWanted) { S.scanWanted = false; beginScan(); }
+    else listen();
   }
   function stopLive() {
     const was = S.live;
     S.live = false;
+    endScanState();
     window.clearInterval(sampler);
     window.clearTimeout(S.screenTimer);
     wipeMemory();
@@ -1368,6 +1547,7 @@ a { color: var(--go); }
   /* ---------- 버튼 ---------- */
   el.main.addEventListener('click', () => {
     if (!S.live) { startLive(); return; }
+    if (S.scan) { stopScan(''); return; }
     if (S.phase === 'ready') {
       S.idleEnds = 0;
       setStatus(S.interp ? '말이 끝나면 「다 말했어요」를 누르세요. 누르지 않아도 잠시 조용하면 옮깁니다.' : '');
@@ -1385,6 +1565,20 @@ a { color: var(--go); }
     interrupt();
   });
   el.end.addEventListener('click', () => { stopLive(); setStatus(''); });
+  el.scan.addEventListener('click', () => {
+    if (S.scan) { stopScan(''); return; }
+    if (reflectUsage().blocked) return;
+    if (!S.live) { S.scanWanted = true; startLive(); return; }
+    if (S.phase === 'prep') { S.scanWanted = true; return; }
+    primeSpeech();
+    beginScan();
+  });
+  // 실시간 번역 중에 화면을 누르면 기다리지 않고 바로 다시 번역합니다.
+  el.stage.addEventListener('click', () => {
+    if (!S.scan) return;
+    scanForce = true;
+    scanSent = null;
+  });
   el.recheck.addEventListener('click', () => {
     store.del('live-ask-blocked');
     const st = reflectUsage();
@@ -1409,6 +1603,7 @@ a { color: var(--go); }
     listen(true);
   });
   el.interp.addEventListener('click', () => {
+    if (S.scan) stopScan('');
     S.interp = !S.interp;
     S.listenLang = S.myLang;
     S.onceLang = '';
@@ -1463,7 +1658,7 @@ a { color: var(--go); }
   el.typed.addEventListener('submit', (e) => {
     e.preventDefault();
     const t = el.typedQ.value.trim();
-    if (!t || !S.live || S.phase === 'prep') return;
+    if (!t || !S.live || S.phase === 'prep' || S.scan) return;
     el.typedQ.value = '';
     primeSpeech();
     S.listenLang = S.myLang;
@@ -1576,7 +1771,7 @@ a { color: var(--go); }
     else if (/Safari\//.test(UA)) browser = 'Safari';
     const mic = { granted: '허용', denied: '차단', prompt: '매번 묻기', unknown: '확인 불가' }[st] || st;
     el.diag.textContent = [
-      '버전: 11',
+      '버전: 13',
       '브라우저: ' + browser,
       '말 알아듣기: ' + (Rec ? '지원' : '미지원'),
       '소리 답변: ' + (canSpeak ? '지원' : '미지원'),
